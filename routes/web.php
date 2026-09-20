@@ -13,6 +13,7 @@ Route::get('/auth/google/callback', [GoogleController::class, 'callback'])
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
+    Route::livewire('/notes', 'notes.index')->name('notes.index');
 });
 
 require __DIR__ . '/settings.php';
