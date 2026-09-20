@@ -68,6 +68,20 @@ new class extends Component {
         $this->noteFolderId = null;
     }
 
+    public function restoreNote(int $noteId): void
+    {
+        $note = auth()->user()->notes()->onlyTrashed()->findOrFail($noteId);
+
+        $note->restore();
+    }
+
+    public function forceDeleteNote(int $noteId): void
+    {
+        $note = auth()->user()->notes()->onlyTrashed()->findOrFail($noteId);
+
+        $note->forceDelete();
+    }
+
     public function showTrash(): void
     {
         $this->isTrashView = true;
@@ -164,8 +178,8 @@ new class extends Component {
             @else
                 <div class="space-y-3">
                     @foreach ($notes as $note)
-                        <article wire:click="selectNote({{ $note->id }})"
-                            class="cursor-pointer rounded-lg border p-4 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                        <article @if (!$isTrashView) wire:click="selectNote({{ $note->id }})" @endif
+                            class="{{ !$isTrashView ? 'cursor-pointer' : '' }} rounded-lg border p-4 hover:bg-zinc-50 dark:hover:bg-zinc-900">
                             <h2 class="font-semibold">
                                 {{ $note->title }}
                             </h2>
@@ -173,6 +187,18 @@ new class extends Component {
                             <p class="mt-1 text-sm text-zinc-500">
                                 {{ $note->content }}
                             </p>
+
+                            @if ($isTrashView)
+                                <button type="button" wire:click="restoreNote({{ $note->id }})"
+                                    class="mt-3 rounded-lg border px-3 py-2 text-sm font-medium">
+                                    Restore
+                                </button>
+                                <button type="button" wire:click="forceDeleteNote({{ $note->id }})"
+                                    wire:confirm="Permanently delete this note? This cannot be undone."
+                                    class="mt-3 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white">
+                                    Delete Permanently
+                                </button>
+                            @endif
                         </article>
                     @endforeach
                 </div>
