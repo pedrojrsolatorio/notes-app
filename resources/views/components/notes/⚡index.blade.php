@@ -12,6 +12,7 @@ new class extends Component {
     public string $title = '';
     public string $content = '';
     public string $search = '';
+    public string $sortBy = 'newest';
 
     public function selectFolder(?int $folderId): void
     {
@@ -120,7 +121,25 @@ new class extends Component {
             });
         }
 
-        $notes = $notesQuery->latest()->get();
+        switch ($this->sortBy) {
+            case 'oldest':
+                $notesQuery->oldest();
+                break;
+
+            case 'title_asc':
+                $notesQuery->orderByRaw('LOWER(title) ASC');
+                break;
+
+            case 'title_desc':
+                $notesQuery->orderByRaw('LOWER(title) DESC');
+                break;
+
+            default:
+                $notesQuery->latest();
+                break;
+        }
+
+        $notes = $notesQuery->get();
 
         $selectedNote = null;
 
@@ -183,6 +202,13 @@ new class extends Component {
             <div class="mb-6">
                 <input type="search" wire:model.live.debounce.300ms="search" placeholder="Search notes..."
                     class="w-full rounded-lg border px-4 py-2">
+
+                <select wire:model.live="sortBy" class="rounded-lg border px-4 py-2 sm:w-48">
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="title_asc">Title A-Z</option>
+                    <option value="title_desc">Title Z-A</option>
+                </select>
             </div>
 
             @if ($notes->isEmpty())
