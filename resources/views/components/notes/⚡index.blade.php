@@ -11,6 +11,7 @@ new class extends Component {
 
     public string $title = '';
     public string $content = '';
+    public string $search = '';
 
     public function selectFolder(?int $folderId): void
     {
@@ -111,6 +112,14 @@ new class extends Component {
             $notesQuery->where('folder_id', $this->selectedFolderId);
         }
 
+        if (trim($this->search) !== '') {
+            $search = '%' . trim($this->search) . '%';
+
+            $notesQuery->where(function ($query) use ($search) {
+                $query->where('title', 'like', $search)->orWhere('content', 'like', $search);
+            });
+        }
+
         $notes = $notesQuery->latest()->get();
 
         $selectedNote = null;
@@ -158,7 +167,7 @@ new class extends Component {
 
         {{-- Notes --}}
         <main class="md:col-span-3">
-            <div class="mb-6 flex items-center justify-between">
+            <div class="mb-6 flex items-center justify-between gap-4">
                 <h1 class="text-2xl font-bold">
                     {{ $isTrashView ? 'Trash' : 'Notes' }}
                 </h1>
@@ -169,6 +178,11 @@ new class extends Component {
                         New Note
                     </button>
                 @endif
+            </div>
+
+            <div class="mb-6">
+                <input type="search" wire:model.live.debounce.300ms="search" placeholder="Search notes..."
+                    class="w-full rounded-lg border px-4 py-2">
             </div>
 
             @if ($notes->isEmpty())
