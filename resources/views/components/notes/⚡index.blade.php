@@ -225,7 +225,7 @@ new class extends Component {
                             </h2>
 
                             <p class="mt-1 text-sm text-zinc-500">
-                                {{ $note->content }}
+                                {{ \Illuminate\Support\Str::limit(strip_tags($note->content ?? ''), 120) }}
                             </p>
 
                             @if ($isTrashView)
@@ -262,7 +262,33 @@ new class extends Component {
                         @endforeach
                     </select>
 
-                    <textarea wire:model="content" class="h-64 w-full rounded-lg border p-3"></textarea>
+                    <div wire:key="tiptap-editor-{{ $selectedNoteId }}" x-data="createTiptapComponent(@js($content))" wire:ignore>
+                        {{-- Toolbar --}}
+                        <div class="mb-2 flex gap-1 rounded-lg border p-1">
+                            <button type="button" @mousedown.prevent @click="toggleBold()"
+                                :class="{ 'bg-zinc-200': isActive('bold') }" class="rounded px-3 py-1 font-bold">
+                                B
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="toggleItalic()"
+                                :class="{ 'bg-zinc-200': isActive('italic') }" class="rounded px-3 py-1 italic">
+                                I
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="toggleUnderline()"
+                                :class="{ 'bg-zinc-200': isActive('underline') }" class="rounded px-3 py-1 underline">
+                                U
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="toggleStrike()"
+                                :class="{ 'bg-zinc-200': isActive('strike') }" class="rounded px-3 py-1 line-through">
+                                S
+                            </button>
+                        </div>
+
+                        {{-- Editor --}}
+                        <div x-ref="editor" class="min-h-64 w-full rounded-lg border p-3 focus:outline-none"></div>
+                    </div>
 
                     <button type="button" wire:click="saveNote"
                         class="mt-4 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
