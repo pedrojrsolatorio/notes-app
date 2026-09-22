@@ -29,7 +29,7 @@ new class extends Component {
         $this->noteFolderId = $note->folder_id;
     }
 
-    public function saveNote(): void
+    public function saveNote(string $content = ''): void
     {
         if (!$this->selectedNoteId) {
             return;
@@ -39,7 +39,7 @@ new class extends Component {
 
         $note->update([
             'title' => $this->title,
-            'content' => $this->content,
+            'content' => $content,
             'folder_id' => $this->noteFolderId,
         ]);
     }
@@ -266,34 +266,74 @@ new class extends Component {
                         {{-- Toolbar --}}
                         <div class="mb-2 flex gap-1 rounded-lg border p-1">
                             <button type="button" @mousedown.prevent @click="toggleBold()"
-                                :class="{ 'bg-zinc-200': isActive('bold') }" class="rounded px-3 py-1 font-bold">
+                                :class="{ 'bg-zinc-200': activeFormats.bold }" class="rounded px-3 py-1 font-bold">
                                 B
                             </button>
 
                             <button type="button" @mousedown.prevent @click="toggleItalic()"
-                                :class="{ 'bg-zinc-200': isActive('italic') }" class="rounded px-3 py-1 italic">
+                                :class="{ 'bg-zinc-200': activeFormats.italic }" class="rounded px-3 py-1 italic">
                                 I
                             </button>
 
                             <button type="button" @mousedown.prevent @click="toggleUnderline()"
-                                :class="{ 'bg-zinc-200': isActive('underline') }" class="rounded px-3 py-1 underline">
+                                :class="{ 'bg-zinc-200': activeFormats.underline }" class="rounded px-3 py-1 underline">
                                 U
                             </button>
 
                             <button type="button" @mousedown.prevent @click="toggleStrike()"
-                                :class="{ 'bg-zinc-200': isActive('strike') }" class="rounded px-3 py-1 line-through">
+                                :class="{ 'bg-zinc-200': activeFormats.strike }" class="rounded px-3 py-1 line-through">
                                 S
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="toggleBulletList()"
+                                :class="{ 'bg-zinc-200': activeFormats.bulletList }" class="rounded px-3 py-1">
+                                • List
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="toggleOrderedList()"
+                                :class="{ 'bg-zinc-200': activeFormats.orderedList }" class="rounded px-3 py-1">
+                                1. List
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setParagraph()"
+                                :class="{ 'bg-zinc-200': activeFormats.paragraph }" class="rounded px-3 py-1 text-sm">
+                                P
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setHeading(1)"
+                                :class="{ 'bg-zinc-200': activeFormats.heading1 }"
+                                class="rounded px-3 py-1 text-sm font-bold">
+                                H1
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setHeading(2)"
+                                :class="{ 'bg-zinc-200': activeFormats.heading2 }"
+                                class="rounded px-3 py-1 text-sm font-bold">
+                                H2
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setHeading(3)"
+                                :class="{ 'bg-zinc-200': activeFormats.heading3 }"
+                                class="rounded px-3 py-1 text-sm font-bold">
+                                H3
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setLink()"
+                                :class="{ 'bg-zinc-200': activeFormats.link }" class="rounded px-3 py-1 text-sm"
+                                title="Link">
+                                🔗
                             </button>
                         </div>
 
                         {{-- Editor --}}
                         <div x-ref="editor" class="min-h-64 w-full rounded-lg border p-3 focus:outline-none"></div>
-                    </div>
 
-                    <button type="button" wire:click="saveNote"
-                        class="mt-4 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
-                        Save
-                    </button>
+                        {{-- Save --}}
+                        <button type="button" @click="$wire.saveNote(getContent())"
+                            class="mt-4 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
+                            Save
+                        </button>
+                    </div>
 
                     <button type="button" wire:click="deleteNote" wire:confirm="Move this to Trash?"
                         class="mt-4 rounded-lg border px-4 py-2 text-sm font-medium">
