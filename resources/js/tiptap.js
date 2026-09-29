@@ -3,6 +3,8 @@ import StarterKit from "@tiptap/starter-kit";
 import TextAlign from "@tiptap/extension-text-align";
 import { TextStyle, FontSize } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
 
 export function createTiptapEditor(element, content = "") {
     return new Editor({
@@ -25,6 +27,11 @@ export function createTiptapEditor(element, content = "") {
             TextStyle,
             FontSize,
             Color,
+
+            TaskList,
+            TaskItem.configure({
+                nested: true,
+            }),
         ],
 
         content,
@@ -95,6 +102,7 @@ export function createTiptapComponent(content = "") {
 
                 bulletList: editor.isActive("bulletList"),
                 orderedList: editor.isActive("orderedList"),
+                taskList: editor.isActive("taskList"),
                 codeBlock: editor.isActive("codeBlock"),
 
                 paragraph: editor.isActive("paragraph"),
@@ -134,6 +142,10 @@ export function createTiptapComponent(content = "") {
 
         toggleOrderedList() {
             editor?.chain().focus().toggleOrderedList().run();
+        },
+
+        toggleTaskList() {
+            editor?.chain().focus().toggleTaskList().run();
         },
 
         toggleCodeBlock() {

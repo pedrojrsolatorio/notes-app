@@ -301,6 +301,12 @@ new class extends Component {
                                 1. List
                             </button>
 
+                            <button type="button" @mousedown.prevent @click="toggleTaskList()"
+                                :class="{ 'bg-zinc-200': activeFormats.taskList }" class="rounded px-3 py-1 text-sm"
+                                title="Checklist">
+                                ☑
+                            </button>
+
                             <button type="button" @mousedown.prevent @click="setParagraph()"
                                 :class="{ 'bg-zinc-200': activeFormats.paragraph }" class="rounded px-3 py-1 text-sm">
                                 P
