@@ -95,6 +95,7 @@ export function createTiptapComponent(content = "") {
 
                 bulletList: editor.isActive("bulletList"),
                 orderedList: editor.isActive("orderedList"),
+                codeBlock: editor.isActive("codeBlock"),
 
                 paragraph: editor.isActive("paragraph"),
                 heading1: editor.isActive("heading", { level: 1 }),
@@ -133,6 +134,10 @@ export function createTiptapComponent(content = "") {
 
         toggleOrderedList() {
             editor?.chain().focus().toggleOrderedList().run();
+        },
+
+        toggleCodeBlock() {
+            editor?.chain().focus().toggleCodeBlock().run();
         },
 
         setParagraph() {

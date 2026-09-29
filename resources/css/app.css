@@ -106,3 +106,19 @@ select:focus[data-flux-control] {
     text-decoration: underline;
     cursor: pointer;
 }
+
+.ProseMirror pre {
+    background: #f4f4f5;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin: 0.75rem 0;
+    overflow-x: auto;
+}
+
+.ProseMirror pre code {
+    font-family:
+        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}

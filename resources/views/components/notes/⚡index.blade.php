@@ -285,6 +285,12 @@ new class extends Component {
                                 S
                             </button>
 
+                            <button type="button" @mousedown.prevent @click="toggleCodeBlock()"
+                                :class="{ 'bg-zinc-200': activeFormats.codeBlock }" class="rounded px-3 py-1 text-sm"
+                                title="Code block">
+                                &lt;/&gt;
+                            </button>
+
                             <button type="button" @mousedown.prevent @click="toggleBulletList()"
                                 :class="{ 'bg-zinc-200': activeFormats.bulletList }" class="rounded px-3 py-1">
                                 • List
