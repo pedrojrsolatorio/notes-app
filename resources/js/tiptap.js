@@ -1,5 +1,6 @@
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import TextAlign from "@tiptap/extension-text-align";
 
 export function createTiptapEditor(element, content = "") {
     return new Editor({
@@ -13,6 +14,10 @@ export function createTiptapEditor(element, content = "") {
                     autolink: true,
                     defaultProtocol: "https",
                 },
+            }),
+
+            TextAlign.configure({
+                types: ["heading", "paragraph"],
             }),
         ],
 
@@ -76,7 +81,6 @@ export function createTiptapComponent(content = "") {
             }
 
             this.activeFormats = {
-                paragraph: editor.isActive("paragraph"),
                 bold: editor.isActive("bold"),
                 italic: editor.isActive("italic"),
                 underline: editor.isActive("underline"),
@@ -84,9 +88,14 @@ export function createTiptapComponent(content = "") {
                 link: editor.isActive("link"),
                 bulletList: editor.isActive("bulletList"),
                 orderedList: editor.isActive("orderedList"),
+                paragraph: editor.isActive("paragraph"),
                 heading1: editor.isActive("heading", { level: 1 }),
                 heading2: editor.isActive("heading", { level: 2 }),
                 heading3: editor.isActive("heading", { level: 3 }),
+                alignLeft: editor.isActive({ textAlign: "left" }),
+                alignCenter: editor.isActive({ textAlign: "center" }),
+                alignRight: editor.isActive({ textAlign: "right" }),
+                alignJustify: editor.isActive({ textAlign: "justify" }),
             };
         },
 
@@ -162,6 +171,22 @@ export function createTiptapComponent(content = "") {
             }
 
             editor.chain().focus().setLink({ href: url }).run();
+        },
+
+        setTextAlign(alignment) {
+            if (!editor) {
+                return;
+            }
+
+            if (
+                editor.isActive({ textAlign: alignment }) &&
+                alignment !== "left"
+            ) {
+                editor.chain().focus().setTextAlign("left").run();
+                return;
+            }
+
+            editor.chain().focus().setTextAlign(alignment).run();
         },
     };
 }

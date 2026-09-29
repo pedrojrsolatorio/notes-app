@@ -11,6 +11,7 @@
         "@tailwindcss/vite": "^4.1.11",
         "@tiptap/core": "^3.31.3",
         "@tiptap/extension-link": "^3.31.3",
+        "@tiptap/extension-text-align": "^3.31.3",
         "@tiptap/extension-underline": "^3.31.3",
         "@tiptap/starter-kit": "^3.31.3",
         "concurrently": "^10.0.3",

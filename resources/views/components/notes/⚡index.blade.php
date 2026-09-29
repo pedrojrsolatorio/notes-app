@@ -323,6 +323,30 @@ new class extends Component {
                                 title="Link">
                                 🔗
                             </button>
+
+                            <button type="button" @mousedown.prevent @click="setTextAlign('left')"
+                                :class="{ 'bg-zinc-200': activeFormats.alignLeft }" class="rounded px-3 py-1 text-sm"
+                                title="Align left">
+                                ⬅
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setTextAlign('center')"
+                                :class="{ 'bg-zinc-200': activeFormats.alignCenter }" class="rounded px-3 py-1 text-sm"
+                                title="Align center">
+                                ↔
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setTextAlign('right')"
+                                :class="{ 'bg-zinc-200': activeFormats.alignRight }" class="rounded px-3 py-1 text-sm"
+                                title="Align right">
+                                ➡
+                            </button>
+
+                            <button type="button" @mousedown.prevent @click="setTextAlign('justify')"
+                                :class="{ 'bg-zinc-200': activeFormats.alignJustify }"
+                                class="rounded px-3 py-1 text-sm" title="Justify">
+                                ☰
+                            </button>
                         </div>
 
                         {{-- Editor --}}
