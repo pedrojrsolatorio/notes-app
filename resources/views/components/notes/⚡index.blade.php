@@ -318,6 +318,23 @@ new class extends Component {
                                 H3
                             </button>
 
+                            <select :value="activeFormats.fontSize" @change="setFontSize($event.target.value)"
+                                class="rounded border border-zinc-300 bg-white px-2 py-1 text-sm" title="Font size">
+                                <option value="mixed" disabled>—</option>
+                                <option value="12px">12</option>
+                                <option value="14px">14</option>
+                                <option value="16px">16</option>
+                                <option value="18px">18</option>
+                                <option value="20px">20</option>
+                                <option value="24px">24</option>
+                                <option value="28px">28</option>
+                                <option value="32px">32</option>
+                            </select>
+
+                            <input type="color" :value="activeFormats.color" @input="setColor($event.target.value)"
+                                class="h-8 w-10 cursor-pointer rounded border border-zinc-300 bg-white p-1"
+                                title="Font color" />
+
                             <button type="button" @mousedown.prevent @click="setLink()"
                                 :class="{ 'bg-zinc-200': activeFormats.link }" class="rounded px-3 py-1 text-sm"
                                 title="Link">
@@ -331,8 +348,8 @@ new class extends Component {
                             </button>
 
                             <button type="button" @mousedown.prevent @click="setTextAlign('center')"
-                                :class="{ 'bg-zinc-200': activeFormats.alignCenter }" class="rounded px-3 py-1 text-sm"
-                                title="Align center">
+                                :class="{ 'bg-zinc-200': activeFormats.alignCenter }"
+                                class="rounded px-3 py-1 text-sm" title="Align center">
                                 ↔
                             </button>
 
