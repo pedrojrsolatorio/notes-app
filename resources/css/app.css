@@ -148,3 +148,23 @@ select:focus[data-flux-control] {
 .ProseMirror ul[data-type="taskList"] li > div {
     flex: 1;
 }
+
+.ProseMirror table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    table-layout: fixed;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+    border: 1px solid #d4d4d8;
+    padding: 0.5rem 0.75rem;
+    vertical-align: top;
+    min-width: 100px;
+}
+
+.ProseMirror th {
+    font-weight: 600;
+    background: #f4f4f5;
+}

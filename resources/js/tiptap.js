@@ -5,6 +5,10 @@ import { TextStyle, FontSize } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
 
 export function createTiptapEditor(element, content = "") {
     return new Editor({
@@ -32,6 +36,13 @@ export function createTiptapEditor(element, content = "") {
             TaskItem.configure({
                 nested: true,
             }),
+
+            Table.configure({
+                resizable: true,
+            }),
+            TableRow,
+            TableHeader,
+            TableCell,
         ],
 
         content,
@@ -104,6 +115,7 @@ export function createTiptapComponent(content = "") {
                 orderedList: editor.isActive("orderedList"),
                 taskList: editor.isActive("taskList"),
                 codeBlock: editor.isActive("codeBlock"),
+                table: editor.isActive("table"),
 
                 paragraph: editor.isActive("paragraph"),
                 heading1: editor.isActive("heading", { level: 1 }),
@@ -367,6 +379,46 @@ export function createTiptapComponent(content = "") {
             }
 
             return "#000000";
+        },
+
+        insertTable() {
+            editor
+                ?.chain()
+                .focus()
+                .insertTable({
+                    rows: 3,
+                    cols: 3,
+                    withHeaderRow: true,
+                })
+                .run();
+        },
+
+        addTableRowBefore() {
+            editor?.chain().focus().addRowBefore().run();
+        },
+
+        addTableRowAfter() {
+            editor?.chain().focus().addRowAfter().run();
+        },
+
+        deleteTableRow() {
+            editor?.chain().focus().deleteRow().run();
+        },
+
+        addTableColumnBefore() {
+            editor?.chain().focus().addColumnBefore().run();
+        },
+
+        addTableColumnAfter() {
+            editor?.chain().focus().addColumnAfter().run();
+        },
+
+        deleteTableColumn() {
+            editor?.chain().focus().deleteColumn().run();
+        },
+
+        deleteTable() {
+            editor?.chain().focus().deleteTable().run();
         },
     };
 }

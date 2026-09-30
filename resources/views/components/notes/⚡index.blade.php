@@ -376,6 +376,60 @@ new class extends Component {
                                 class="rounded px-3 py-1 text-sm" title="Justify">
                                 ☰
                             </button>
+
+                            <button type="button" @mousedown.prevent @click="insertTable()"
+                                class="rounded px-3 py-1 text-sm" title="Insert table">
+                                ▦
+                            </button>
+
+                            <div x-show="activeFormats.table" x-data="{ tableMenuOpen: false }" class="relative">
+                                <button type="button" @click="tableMenuOpen = !tableMenuOpen"
+                                    class="rounded px-3 py-1 text-sm" title="Table options">
+                                    Table ▾
+                                </button>
+
+                                <div x-show="tableMenuOpen" @click.outside="tableMenuOpen = false"
+                                    class="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
+                                    <button type="button" @click="addTableRowBefore(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100">
+                                        Add row above
+                                    </button>
+
+                                    <button type="button" @click="addTableRowAfter(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100">
+                                        Add row below
+                                    </button>
+
+                                    <button type="button" @click="deleteTableRow(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100">
+                                        Delete row
+                                    </button>
+
+                                    <div class="my-1 border-t border-zinc-200"></div>
+
+                                    <button type="button" @click="addTableColumnBefore(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100">
+                                        Add column left
+                                    </button>
+
+                                    <button type="button" @click="addTableColumnAfter(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100">
+                                        Add column right
+                                    </button>
+
+                                    <button type="button" @click="deleteTableColumn(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100">
+                                        Delete column
+                                    </button>
+
+                                    <div class="my-1 border-t border-zinc-200"></div>
+
+                                    <button type="button" @click="deleteTable(); tableMenuOpen = false"
+                                        class="block w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
+                                        Delete table
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         {{-- Editor --}}
