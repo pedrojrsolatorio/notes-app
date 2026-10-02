@@ -9,6 +9,7 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
+import Highlight from "@tiptap/extension-highlight";
 
 export function createTiptapEditor(element, content = "") {
     return new Editor({
@@ -31,6 +32,7 @@ export function createTiptapEditor(element, content = "") {
             TextStyle,
             FontSize,
             Color,
+            Highlight,
 
             TaskList,
             TaskItem.configure({
@@ -109,6 +111,7 @@ export function createTiptapComponent(content = "") {
                 italic: editor.isActive("italic"),
                 underline: editor.isActive("underline"),
                 strike: editor.isActive("strike"),
+                highlight: editor.isActive("highlight"),
                 link: editor.isActive("link"),
 
                 bulletList: editor.isActive("bulletList"),
@@ -236,6 +239,10 @@ export function createTiptapComponent(content = "") {
 
         setColor(color) {
             editor?.chain().focus().setColor(color).run();
+        },
+
+        toggleHighlight() {
+            editor?.chain().focus().toggleHighlight().run();
         },
 
         getEffectiveFontSize() {

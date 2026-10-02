@@ -347,6 +347,12 @@ new class extends Component {
                                 class="h-8 w-10 cursor-pointer rounded border border-zinc-300 bg-white p-1"
                                 title="Font color" />
 
+                            <button type="button" @mousedown.prevent @click="toggleHighlight()"
+                                :class="{ 'bg-zinc-200': activeFormats.highlight }" class="rounded px-3 py-1 text-sm"
+                                title="Highlight">
+                                🖍️
+                            </button>
+
                             <button type="button" @mousedown.prevent @click="setLink()"
                                 :class="{ 'bg-zinc-200': activeFormats.link }" class="rounded px-3 py-1 text-sm"
                                 title="Link">

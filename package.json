@@ -11,6 +11,7 @@
         "@tailwindcss/vite": "^4.1.11",
         "@tiptap/core": "^3.31.3",
         "@tiptap/extension-color": "^3.31.3",
+        "@tiptap/extension-highlight": "^3.31.3",
         "@tiptap/extension-link": "^3.31.3",
         "@tiptap/extension-list-item": "^3.31.3",
         "@tiptap/extension-table": "^3.31.3",
