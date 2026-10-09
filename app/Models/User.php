@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 use Laravel\Fortify\Contracts\PasskeyUser;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
@@ -69,5 +70,10 @@ class User extends Authenticatable implements PasskeyUser
     public function notes()
     {
         return $this->hasMany(Note::class);
+    }
+
+    public function noteAttachments(): HasMany
+    {
+        return $this->hasMany(NoteAttachment::class);
     }
 }

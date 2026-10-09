@@ -14,6 +14,10 @@ Route::get('/auth/google/callback', [GoogleController::class, 'callback'])
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     Route::livewire('/notes', 'notes.index')->name('notes.index');
+    Route::get('/note-attachments/{attachment}/download', [
+        \App\Http\Controllers\NoteAttachmentController::class,
+        'download',
+    ])->name('note-attachments.download');
 });
 
 require __DIR__ . '/settings.php';

@@ -2,8 +2,11 @@
 
 use App\Models\Note;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 new class extends Component {
+    use WithFileUploads;
+
     public ?int $selectedFolderId = null;
     public ?int $selectedNoteId = null;
     public ?int $noteFolderId = null;
@@ -13,6 +16,8 @@ new class extends Component {
     public string $content = '';
     public string $search = '';
     public string $sortBy = 'newest';
+
+    public $attachment = null;
 
     public function selectFolder(?int $folderId): void
     {
@@ -97,6 +102,38 @@ new class extends Component {
     public function showNotes(): void
     {
         $this->isTrashView = false;
+    }
+
+    protected function attachmentValidationRules(): array
+    {
+        return [
+            'attachment' => ['required', 'file', 'max:10240', 'mimes:pdf,doc,docx,txt,rtf,odt,xls,xlsx,ppt,pptx,csv,jpg,jpeg,png'],
+        ];
+    }
+
+    public function uploadAttachment(): void
+    {
+        if (!$this->selectedNoteId) {
+            return;
+        }
+
+        $this->validate($this->attachmentValidationRules());
+
+        $note = auth()->user()->notes()->findOrFail($this->selectedNoteId);
+
+        $file = $this->attachment;
+
+        $path = $file->store('note-attachments/' . auth()->id(), 'local');
+
+        $note->attachments()->create([
+            'user_id' => auth()->id(),
+            'original_name' => $file->getClientOriginalName(),
+            'file_path' => $path,
+            'mime_type' => $file->getMimeType(),
+            'file_size' => $file->getSize(),
+        ]);
+
+        $this->attachment = null;
     }
 
     public function render()
