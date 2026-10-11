@@ -299,7 +299,7 @@ new class extends Component {
                         @endforeach
                     </select>
 
-                    <div wire:key="tiptap-editor-{{ $selectedNoteId }}" x-data="createTiptapComponent(@js($content))" wire:ignore>
+                    <div wire:key="tiptap-editor-{{ $selectedNoteId }}" x-data="createTiptapComponent(@js($content))" wire:ignore @save-note-requested.window="$wire.saveNote(getContent())">
                         {{-- Toolbar --}}
                         <div class="mb-2 flex gap-1 rounded-lg border p-1">
                             <button type="button" @mousedown.prevent @click="toggleBold()"
@@ -477,13 +477,39 @@ new class extends Component {
 
                         {{-- Editor --}}
                         <div x-ref="editor" class="min-h-64 w-full rounded-lg border p-3 focus:outline-none"></div>
-
-                        {{-- Save --}}
-                        <button type="button" @click="$wire.saveNote(getContent())"
-                            class="mt-4 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
-                            Save
-                        </button>
                     </div>
+
+                    <div class="mt-6 border-t border-zinc-200 pt-4">
+                        <h3 class="mb-3 text-sm font-semibold text-zinc-800">
+                            Attachments
+                        </h3>
+
+                        <form wire:submit="uploadAttachment" class="flex flex-wrap items-center gap-3">
+                            <input type="file" wire:model="attachment"
+                                accept=".pdf,.doc,.docx,.txt,.rtf,.odt,.xls,.xlsx,.ppt,.pptx,.csv,.jpg,.jpeg,.png"
+                                class="block max-w-full text-sm text-zinc-600" />
+
+                            <button type="submit" wire:loading.attr="disabled"
+                                wire:target="uploadAttachment, attachment"
+                                class="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                                Upload file
+                            </button>
+                        </form>
+
+                        <div wire:loading wire:target="attachment" class="mt-2 text-sm text-zinc-500">
+                            Uploading file to the server...
+                        </div>
+
+                        @error('attachment')
+                            <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
+                        @enderror
+                    </div>
+
+                    {{-- Save --}}
+                    <button type="button" @click="$dispatch('save-note-requested')"
+                        class="mt-4 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
+                        Save
+                    </button>
 
                     <button type="button" wire:click="deleteNote" wire:confirm="Move this to Trash?"
                         class="mt-4 rounded-lg border px-4 py-2 text-sm font-medium">
