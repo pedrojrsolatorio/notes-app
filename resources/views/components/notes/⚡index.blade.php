@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\Note;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -40,12 +42,17 @@ new class extends Component {
             return;
         }
 
+        $validated = $this->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'noteFolderId' => ['nullable', 'integer', Rule::exists('folders', 'id')->where('user_id', auth()->id())],
+        ]);
+
         $note = auth()->user()->notes()->findOrFail($this->selectedNoteId);
 
         $note->update([
-            'title' => $this->title,
+            'title' => $validated['title'],
             'content' => $content,
-            'folder_id' => $this->noteFolderId,
+            'folder_id' => $validated['noteFolderId'],
         ]);
     }
 
@@ -125,15 +132,38 @@ new class extends Component {
 
         $path = $file->store('note-attachments/' . auth()->id(), 'local');
 
-        $note->attachments()->create([
-            'user_id' => auth()->id(),
-            'original_name' => $file->getClientOriginalName(),
-            'file_path' => $path,
-            'mime_type' => $file->getMimeType(),
-            'file_size' => $file->getSize(),
-        ]);
+        try {
+            $note->attachments()->create([
+                'user_id' => auth()->id(),
+                'original_name' => $file->getClientOriginalName(),
+                'file_path' => $path,
+                'mime_type' => $file->getMimeType(),
+                'file_size' => $file->getSize(),
+            ]);
+        } catch (\Throwable $e) {
+            Storage::disk('local')->delete($path);
+
+            throw $e;
+        }
 
         $this->attachment = null;
+    }
+
+    public function deleteAttachment(int $attachmentId): void
+    {
+        if (!$this->selectedNoteId) {
+            return;
+        }
+
+        $note = auth()->user()->notes()->findOrFail($this->selectedNoteId);
+
+        $attachment = $note->attachments()->whereKey($attachmentId)->firstOrFail();
+
+        if (Storage::disk('local')->exists($attachment->file_path)) {
+            Storage::disk('local')->delete($attachment->file_path);
+        }
+
+        $attachment->delete();
     }
 
     public function render()
@@ -289,6 +319,10 @@ new class extends Component {
 
                     <input type="text" wire:model="title" class="mb-4 w-full rounded-lg border px-3 py-2">
 
+                    @error('title')
+                        <p class="-mt-3 mb-3 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+
                     <select wire:model="noteFolderId" class="mb-4 w-full rounded-lg border px-3 py-2">
                         <option value="">No Folder</option>
 
@@ -298,6 +332,10 @@ new class extends Component {
                             </option>
                         @endforeach
                     </select>
+
+                    @error('noteFolderId')
+                        <p class="-mt-3 mb-3 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
 
                     <div wire:key="tiptap-editor-{{ $selectedNoteId }}" x-data="createTiptapComponent(@js($content))" wire:ignore @save-note-requested.window="$wire.saveNote(getContent())">
                         {{-- Toolbar --}}
@@ -483,6 +521,31 @@ new class extends Component {
                         <h3 class="mb-3 text-sm font-semibold text-zinc-800">
                             Attachments
                         </h3>
+
+                        <div class="mb-4 overflow-hidden rounded-lg border border-zinc-200">
+                            @forelse ($selectedNote->attachments as $attachment)
+                                <div class="flex items-center justify-between gap-3 p-3 {{ !$loop->last ? 'border-b border-zinc-200' : '' }}">
+                                    <div class="min-w-0">
+                                        <p class="truncate text-sm font-medium">{{ $attachment->original_name }}</p>
+                                        <p class="text-xs text-zinc-500">{{ number_format($attachment->file_size / 1024, 1) }} KB</p>
+                                    </div>
+
+                                    <div class="flex shrink-0 items-center gap-2">
+                                        <a href="{{ route('note-attachments.download', $attachment) }}"
+                                            class="rounded-lg border px-3 py-1 text-sm font-medium">
+                                            Download
+                                        </a>
+                                        <button type="button" wire:click="deleteAttachment({{ $attachment->id }})"
+                                            wire:confirm="Delete this attachment?"
+                                            class="rounded-lg border border-red-200 px-3 py-1 text-sm font-medium text-red-600">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            @empty
+                                <p class="p-3 text-sm text-zinc-500">No attachments yet.</p>
+                            @endforelse
+                        </div>
 
                         <form wire:submit="uploadAttachment" class="flex flex-wrap items-center gap-3">
                             <input type="file" wire:model="attachment"

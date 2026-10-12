@@ -14,15 +14,15 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 
 ## Incomplete Features
 
-1. **Attachment list/download/delete UI** — backend (upload + download endpoint) is complete; the notes template has the upload form only. No list, no download links, no delete action/endpoint.
+1. ~~**Attachment list/download/delete UI**~~ — **COMPLETED 2026-10-12.** Template lists the selected note's attachments (name, size, plain-anchor download link, `wire:confirm` delete); new `deleteAttachment()` is owner-scoped via the user's note, removes file + row, tolerates missing files; upload wraps the DB create so a DB failure deletes the orphaned file. Covered by 9 new tests in `tests/Feature/NotesTest.php`.
 2. **Observer cleanup** — `UserObserver` still has empty `updated/deleted/restored/forceDeleted` stubs (unused `Folder` import already removed).
 3. **`notes.version` column** exists (`default 1`) but is never read or incremented.
-4. **Test gaps** — no tests for: trash/restore/force-delete, attachment upload/download, search/sort behavior, observer seeding assertion, folder-ownership validation.
+4. **Test gaps** — no tests for: trash/restore/force-delete, search/sort behavior, observer seeding assertion.
 
 ## Known Issues (ordered by severity)
 
-1. **`saveNote()` trusts `noteFolderId` without ownership check** (`resources/views/components/notes/⚡index.blade.php:45-49`). A forged `folder_id` attaches the attacker's note to another user's folder (sequential ids), exposing note content to the folder owner. Fix with scoped validation before any multi-user exposure.
-2. **`saveNote()` has no title validation** — `title` is `string(255)`; overlong input errors on MySQL strict mode.
+1. ~~**`saveNote()` trusts `noteFolderId` without ownership check**~~ — **FIXED 2026-10-12.** `saveNote()` now validates `noteFolderId` with `Rule::exists('folders','id')->where('user_id', auth()->id())`; forged cross-user ids fail validation and the note is untouched. Covered by a regression test.
+2. ~~**`saveNote()` has no title validation**~~ — **FIXED 2026-10-12.** `saveNote()` now validates `title` as `required|string|max:255`, with `@error` messages under the title and folder inputs. Covered by overlong/empty-title tests.
 3. **Pint style drift (5 files):** `app/Models/User.php` (`ordered_imports`), `app/Http/Controllers/Auth/GoogleController.php`, `app/Http/Controllers/NoteAttachmentController.php` (incl. unused `Request` import), `app/Providers/AppServiceProvider.php`, `routes/web.php` (inline FQCN → import). Run Pint with explicit paths (see 5).
 4. **Search `LIKE` does not escape `%`/`_`** — semantics only (searching `%` matches everything); the OR group scoping is correct, no leak.
 5. **Git object damage — REPAIRED 2026-10-11.** Thirteen zero-byte loose objects (incl. tip commit `80cca0c`, mtime 2026-10-09) broke `log`/`status` (`fatal: bad object HEAD`). Healed by deleting the 0-byte files and copying the healthy objects from a fresh GitHub clone (`cp -rn`, content-addressed so existing valid objects were untouched). `git fsck --full` is now clean (only harmless dangling blobs); `log`/`status` work. Remote `main` was byte-identical to the local tip, so nothing was lost. Root cause undetermined — likely interrupted write or WSL filesystem flakiness (same family as the sandbox-only `storage/framework/views/livewire/*` I/O errors).
@@ -31,7 +31,8 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 
 ## Test Status
 
-- **Full suite: 37 passed / 94 assertions** (2026-10-11, `php:8.3-cli` container, in-memory SQLite). Includes new `NotesTest.php` and `GoogleControllerTest.php`.
+- **Full suite: 37 passed / 94 assertions** (2026-10-11, `php:8.3-cli` container, in-memory SQLite). Includes `NotesTest.php` and `GoogleControllerTest.php`.
+- **`tests/Feature/NotesTest.php`: 14 passed / 34 assertions** (2026-10-12, file run only — 9 attachment tests + 3 save-validation tests). Full-suite rerun pending.
 - CI (`.github/workflows/tests.yml`): PHP 8.3 + Node 22, `composer setup` then `composer ci:check` (config:clear + pint + phpstan + tests).
 - Sandbox caveat: this agent environment has no PHP; container runs need `-e VIEW_COMPILED_PATH=/tmp/vc` because the sandbox mount cannot read `storage/framework/views/livewire/*`. Unnecessary on the dev machine, where the app renders normally.
 
