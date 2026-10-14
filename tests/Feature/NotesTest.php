@@ -65,6 +65,112 @@ test('saving a note with no folder stores null folder', function () {
     ]);
 });
 
+test('moves a note to trash and hides it from the list', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Trash me', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->call('deleteNote')
+        ->assertDontSee('Trash me');
+
+    $this->assertSoftDeleted('notes', ['id' => $note->id]);
+});
+
+test('restores a trashed note', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Gone', 'content' => 'old']);
+    $note->delete();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('showTrash')
+        ->assertSee('Gone')
+        ->call('restoreNote', $note->id);
+
+    expect($note->fresh()->trashed())->toBeFalse();
+});
+
+test('permanently deletes a trashed note', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Gone forever', 'content' => 'old']);
+    $note->delete();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('showTrash')
+        ->assertSee('Gone forever')
+        ->call('forceDeleteNote', $note->id);
+
+    $this->assertDatabaseMissing('notes', ['id' => $note->id]);
+});
+
+test('cannot restore another users trashed note', function () {
+    $owner = User::factory()->create();
+    $intruder = User::factory()->create();
+    $note = $owner->notes()->create(['title' => 'Gone', 'content' => 'old']);
+    $note->delete();
+
+    $this->actingAs($intruder);
+
+    try {
+        Livewire::test('notes.index')
+            ->call('showTrash')
+            ->call('restoreNote', $note->id);
+
+        $this->fail('Restoring another users note should fail.');
+    } catch (ModelNotFoundException) {
+        // Expected: trashed notes are only visible within the owner's scope.
+    }
+
+    expect($note->fresh()->trashed())->toBeTrue();
+});
+
+test('filters notes by folder', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Hobbies']);
+    $user->notes()->create(['title' => 'Folder note', 'content' => 'old', 'folder_id' => $folder->id]);
+    $user->notes()->create(['title' => 'Loose note', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectFolder', $folder->id)
+        ->assertSee('Folder note')
+        ->assertDontSee('Loose note');
+});
+
+test('searches notes by title and content', function () {
+    $user = User::factory()->create();
+    $user->notes()->create(['title' => 'Buy milk', 'content' => 'from the store']);
+    $user->notes()->create(['title' => 'Read book', 'content' => 'buy more milk first']);
+    $user->notes()->create(['title' => 'Call mom', 'content' => 'on Sunday']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->set('search', 'milk')
+        ->assertSee('Buy milk')
+        ->assertSee('Read book')
+        ->assertDontSee('Call mom');
+});
+
+test('sorts notes alphabetically by title', function () {
+    $user = User::factory()->create();
+    $user->notes()->create(['title' => 'Zebra note', 'content' => 'old']);
+    $user->notes()->create(['title' => 'Apple note', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->set('sortBy', 'title_asc')
+        ->assertSeeInOrder(['Apple note', 'Zebra note']);
+});
+
 test('rejects saving a note into another users folder', function () {
     $user = User::factory()->create();
     $victim = User::factory()->create();

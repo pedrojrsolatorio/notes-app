@@ -17,7 +17,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 1. ~~**Attachment list/download/delete UI**~~ — **COMPLETED 2026-10-12.** Template lists the selected note's attachments (name, size, plain-anchor download link, `wire:confirm` delete); new `deleteAttachment()` is owner-scoped via the user's note, removes file + row, tolerates missing files; upload wraps the DB create so a DB failure deletes the orphaned file. Covered by 9 new tests in `tests/Feature/NotesTest.php`.
 2. **Observer cleanup** — `UserObserver` still has empty `updated/deleted/restored/forceDeleted` stubs (unused `Folder` import already removed).
 3. **`notes.version` column** exists (`default 1`) but is never read or incremented.
-4. **Test gaps** — no tests for: trash/restore/force-delete, search/sort behavior, observer seeding assertion.
+4. ~~**Test gaps**~~ — **CLOSED 2026-10-12.** `NotesTest.php` now covers trash/restore/force-delete (+ cross-user restore isolation), folder filter, title+content search, and title A–Z sort; `RegistrationTest.php` asserts the 4 seeded folders via the real registration path.
 
 ## Known Issues (ordered by severity)
 
@@ -32,16 +32,16 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 ## Test Status
 
 - **Full suite: 37 passed / 94 assertions** (2026-10-11, `php:8.3-cli` container, in-memory SQLite). Includes `NotesTest.php` and `GoogleControllerTest.php`.
-- **`tests/Feature/NotesTest.php`: 14 passed / 34 assertions** (2026-10-12, file run only — 9 attachment tests + 3 save-validation tests). Full-suite rerun pending.
+- **`tests/Feature/NotesTest.php` + `tests/Feature/Auth/RegistrationTest.php`: 24 passed / 54 assertions** (2026-10-12, file runs only — attachments, save validation, trash lifecycle, folder filter, search, sort, observer seeding). Full-suite rerun pending.
 - CI (`.github/workflows/tests.yml`): PHP 8.3 + Node 22, `composer setup` then `composer ci:check` (config:clear + pint + phpstan + tests).
 - Sandbox caveat: this agent environment has no PHP; container runs need `-e VIEW_COMPILED_PATH=/tmp/vc` because the sandbox mount cannot read `storage/framework/views/livewire/*`. Unnecessary on the dev machine, where the app renders normally.
 
 ## Recommended Next Tasks
 
-1. Add folder-ownership validation to `saveNote()` + regression test (forged cross-user `folder_id` → rejected). [Security]
-2. Add title validation to `saveNote()` + test (overlong title). [Correctness]
-3. Build attachment list/download-link/delete UI + endpoint + tests. [Feature — scope was discussed, decision pending]
-4. Run Pint on the 5 drifted files; repair git HEAD. [Hygiene]
+1. ~~Add folder-ownership validation to `saveNote()`~~ — DONE 2026-10-12.
+2. ~~Add title validation to `saveNote()`~~ — DONE 2026-10-12.
+3. ~~Build attachment list/download-link/delete UI + endpoint + tests~~ — DONE 2026-10-12.
+4. Run Pint on the 5 drifted files. (Git HEAD repair — DONE 2026-10-11.) [Hygiene]
 5. Run `composer types:check` on the dev machine (PHPStan unverified). [Verification]
 6. Remove observer stubs; add seeding assertion test. [Hygiene]
 7. Decide the fate of `notes.version` (use it or drop the column). [Cleanup]
