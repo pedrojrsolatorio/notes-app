@@ -23,7 +23,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 
 1. ~~**`saveNote()` trusts `noteFolderId` without ownership check**~~ — **FIXED 2026-10-12.** `saveNote()` now validates `noteFolderId` with `Rule::exists('folders','id')->where('user_id', auth()->id())`; forged cross-user ids fail validation and the note is untouched. Covered by a regression test.
 2. ~~**`saveNote()` has no title validation**~~ — **FIXED 2026-10-12.** `saveNote()` now validates `title` as `required|string|max:255`, with `@error` messages under the title and folder inputs. Covered by overlong/empty-title tests.
-3. **Pint style drift (5 files):** `app/Models/User.php` (`ordered_imports`), `app/Http/Controllers/Auth/GoogleController.php`, `app/Http/Controllers/NoteAttachmentController.php` (incl. unused `Request` import), `app/Providers/AppServiceProvider.php`, `routes/web.php` (inline FQCN → import). Run Pint with explicit paths (see 5).
+3. ~~**Pint style drift (5 files)**~~ — **FIXED 2026-10-12** (manual edits mirroring Pint's `laravel` preset: import ordering, unused imports, spacing/indentation; `pint --test` passes on all touched files). Notable corrections: same-namespace imports are *removed* by the preset (`User.php` needs no `Folder`/`Note` imports — `AGENTS.md` corrected), and the preset keeps `! $user` spaced. Verified by 26 passing tests across the 3 affected suites.
 4. **Search `LIKE` does not escape `%`/`_`** — semantics only (searching `%` matches everything); the OR group scoping is correct, no leak.
 5. **Git object damage — REPAIRED 2026-10-11.** Thirteen zero-byte loose objects (incl. tip commit `80cca0c`, mtime 2026-10-09) broke `log`/`status` (`fatal: bad object HEAD`). Healed by deleting the 0-byte files and copying the healthy objects from a fresh GitHub clone (`cp -rn`, content-addressed so existing valid objects were untouched). `git fsck --full` is now clean (only harmless dangling blobs); `log`/`status` work. Remote `main` was byte-identical to the local tip, so nothing was lost. Root cause undetermined — likely interrupted write or WSL filesystem flakiness (same family as the sandbox-only `storage/framework/views/livewire/*` I/O errors).
 6. **Google OAuth callback has no throttle.** Acceptable while Google-verified emails only; revisit before broad exposure.
@@ -41,7 +41,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 1. ~~Add folder-ownership validation to `saveNote()`~~ — DONE 2026-10-12.
 2. ~~Add title validation to `saveNote()`~~ — DONE 2026-10-12.
 3. ~~Build attachment list/download-link/delete UI + endpoint + tests~~ — DONE 2026-10-12.
-4. Run Pint on the 5 drifted files. (Git HEAD repair — DONE 2026-10-11.) [Hygiene]
+4. ~~Run Pint on the 5 drifted files. (Git HEAD repair — DONE 2026-10-11.)~~ — DONE 2026-10-12. [Hygiene]
 5. Run `composer types:check` on the dev machine (PHPStan unverified). [Verification]
 6. Remove observer stubs; add seeding assertion test. [Hygiene]
 7. Decide the fate of `notes.version` (use it or drop the column). [Cleanup]

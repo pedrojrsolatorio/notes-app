@@ -2,14 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\NoteAttachment;
 use Illuminate\Support\Facades\Storage;
 
 class NoteAttachmentController extends Controller
 {
-    
-public function download(NoteAttachment $attachment)
+    public function download(NoteAttachment $attachment)
     {
         $user = auth()->user();
 
