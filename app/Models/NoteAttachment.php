@@ -16,11 +16,13 @@ class NoteAttachment extends Model
         'file_size',
     ];
 
+    /** @return BelongsTo<Note, $this> */
     public function note(): BelongsTo
     {
         return $this->belongsTo(Note::class);
     }
 
+    /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

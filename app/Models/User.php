@@ -62,16 +62,19 @@ class User extends Authenticatable implements PasskeyUser
             : $initials;
     }
 
-    public function folders()
+    /** @return HasMany<Folder, $this> */
+    public function folders(): HasMany
     {
         return $this->hasMany(Folder::class);
     }
 
-    public function notes()
+    /** @return HasMany<Note, $this> */
+    public function notes(): HasMany
     {
         return $this->hasMany(Note::class);
     }
 
+    /** @return HasMany<NoteAttachment, $this> */
     public function noteAttachments(): HasMany
     {
         return $this->hasMany(NoteAttachment::class);

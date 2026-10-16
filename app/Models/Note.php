@@ -17,16 +17,19 @@ class Note extends Model
         'content',
     ];
 
+    /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
+    /** @return BelongsTo<Folder, $this> */
     public function folder(): BelongsTo
     {
         return $this->belongsTo(Folder::class);
     }
 
+    /** @return HasMany<NoteAttachment, $this> */
     public function attachments(): HasMany
     {
         return $this->hasMany(NoteAttachment::class);

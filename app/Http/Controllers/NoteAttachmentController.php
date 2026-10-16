@@ -4,10 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\NoteAttachment;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class NoteAttachmentController extends Controller
 {
-    public function download(NoteAttachment $attachment)
+    public function download(NoteAttachment $attachment): StreamedResponse
     {
         $user = auth()->user();
 
