@@ -514,7 +514,7 @@ new class extends Component {
                         </div>
 
                         {{-- Editor --}}
-                        <div x-ref="editor" class="min-h-64 w-full rounded-lg border p-3 focus:outline-none"></div>
+                        <div x-ref="editor" class="w-full rounded-lg border"></div>
                     </div>
 
                     <div class="mt-6 border-t border-zinc-200 pt-4">
