@@ -1,8 +1,10 @@
 <?php
 
 use App\Models\Note;
+use Flux\Flux;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -42,10 +44,16 @@ new class extends Component {
             return;
         }
 
-        $validated = $this->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'noteFolderId' => ['nullable', 'integer', Rule::exists('folders', 'id')->where('user_id', auth()->id())],
-        ]);
+        try {
+            $validated = $this->validate([
+                'title' => ['required', 'string', 'max:255'],
+                'noteFolderId' => ['nullable', 'integer', Rule::exists('folders', 'id')->where('user_id', auth()->id())],
+            ]);
+        } catch (ValidationException $e) {
+            Flux::toast(variant: 'danger', text: __('Note could not be saved. Check the highlighted fields.'));
+
+            throw $e;
+        }
 
         $note = auth()->user()->notes()->findOrFail($this->selectedNoteId);
 
@@ -54,6 +62,8 @@ new class extends Component {
             'content' => $content,
             'folder_id' => $validated['noteFolderId'],
         ]);
+
+        Flux::toast(variant: 'success', text: __('Note saved.'));
     }
 
     public function createNote(): void
@@ -64,6 +74,8 @@ new class extends Component {
             'title' => 'Untitled Note',
             'content' => '',
         ]);
+
+        Flux::toast(variant: 'success', text: __('Note created.'));
     }
 
     public function deleteNote(): void
@@ -80,6 +92,8 @@ new class extends Component {
         $this->title = '';
         $this->content = '';
         $this->noteFolderId = null;
+
+        Flux::toast(variant: 'success', text: __('Note moved to trash.'));
     }
 
     public function restoreNote(int $noteId): void
@@ -87,6 +101,8 @@ new class extends Component {
         $note = auth()->user()->notes()->onlyTrashed()->findOrFail($noteId);
 
         $note->restore();
+
+        Flux::toast(variant: 'success', text: __('Note restored.'));
     }
 
     public function forceDeleteNote(int $noteId): void
@@ -94,6 +110,8 @@ new class extends Component {
         $note = auth()->user()->notes()->onlyTrashed()->findOrFail($noteId);
 
         $note->forceDelete();
+
+        Flux::toast(variant: 'success', text: __('Note permanently deleted.'));
     }
 
     public function showTrash(): void
@@ -124,7 +142,13 @@ new class extends Component {
             return;
         }
 
-        $this->validate($this->attachmentValidationRules());
+        try {
+            $this->validate($this->attachmentValidationRules());
+        } catch (ValidationException $e) {
+            Flux::toast(variant: 'danger', text: __('Attachment could not be uploaded. Check the highlighted field.'));
+
+            throw $e;
+        }
 
         $note = auth()->user()->notes()->findOrFail($this->selectedNoteId);
 
@@ -147,6 +171,8 @@ new class extends Component {
         }
 
         $this->attachment = null;
+
+        Flux::toast(variant: 'success', text: __('Attachment uploaded.'));
     }
 
     public function deleteAttachment(int $attachmentId): void
@@ -164,6 +190,8 @@ new class extends Component {
         }
 
         $attachment->delete();
+
+        Flux::toast(variant: 'success', text: __('Attachment deleted.'));
     }
 
     public function render()

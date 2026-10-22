@@ -13,6 +13,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 - **Frontend built:** `public/build/manifest.json` exists; Vite 8.3.0, Tailwind 4.3.3, Tiptap 3.31.3.
 - **PHPStan level-7 typing fixes (2026-10-16):** resolved all 13 errors reported by `composer types:check` on the dev machine — explicit return types on both OAuth/attachment controller actions and PHPDoc relation generics (`BelongsTo<User, $this>`, `HasMany<Note, $this>`, …) on `Folder`/`Note`/`NoteAttachment`/`User`. Attachment download is typed `StreamedResponse` (verified against `FilesystemAdapter::download()` in vendor; `BinaryFileResponse` is wrong there). Full suite re-verified green after the change.
 - **Editor click-to-focus fix (2026-10-16):** the Tiptap caret only appeared when clicking the text line, not the empty editor area. Cause: the `x-ref="editor"` wrapper carried `min-h-64 p-3`, but Tiptap's `.ProseMirror` contenteditable grows only to content height, so clicks in the empty area never reached ProseMirror. Fixed by moving `min-height: 16rem`, `padding: 0.75rem`, `outline: none` onto `.ProseMirror` in `resources/css/app.css` and reducing the wrapper to `w-full rounded-lg border` (`⚡index.blade.php:517`). Clicking anywhere in the box now places the caret (at doc end past the content). **Requires a frontend rebuild (`npm run dev`/`npm run build`) to take effect.**
+- **Action feedback toasts (2026-10-16):** every note/attachment action now reports its outcome via `Flux::toast()` — success (`variant: 'success'`) for save, create, trash, restore, permanent delete, upload, and attachment delete; `variant: 'danger'` toasts on save/upload validation failure (inline `@error` messages are preserved by rethrowing the `ValidationException`). Renders through the existing `<flux:toast.group>` in the app layouts. Covered by 6 new tests in `tests/Feature/NotesTest.php` asserting the dispatched `toast-show` event, text, and variant (incl. that a failed save leaves the note unchanged).
 
 ## Incomplete Features
 
@@ -33,7 +34,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 
 ## Test Status
 
-- **Full suite: 57 passed / 141 assertions** (2026-10-16, `php:8.3-cli` container, in-memory SQLite). Supersedes earlier partial totals; covers all suites incl. notes, attachments, auth, settings.
+- **Full suite: 63 passed / 158 assertions** (2026-10-16, `php:8.3-cli` container, in-memory SQLite). Supersedes earlier partial totals; covers all suites incl. notes, attachments, toasts, auth, settings.
 - ~~`NotesTest.php` + `RegistrationTest.php`: 24 passed / 54 assertions (2026-10-12 file run)~~ — folded into the full-suite total above.
 - CI (`.github/workflows/tests.yml`): PHP 8.3 + Node 22, `composer setup` then `composer ci:check` (config:clear + pint + phpstan + tests).
 - Sandbox caveat: this agent environment has no PHP; container runs need `-e VIEW_COMPILED_PATH=/tmp/vc` because the sandbox mount cannot read `storage/framework/views/livewire/*`. Unnecessary on the dev machine, where the app renders normally.

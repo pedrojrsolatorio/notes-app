@@ -444,3 +444,119 @@ test('deleting an attachment with a missing file still removes the record', func
 
     $this->assertDatabaseMissing('note_attachments', ['id' => $attachment->id]);
 });
+
+test('shows a success toast when saving a note', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->set('title', 'Updated')
+        ->call('saveNote', '<p>Body</p>')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['slots']['text'] === 'Note saved.'
+                && $params['dataset']['variant'] === 'success';
+        });
+});
+
+test('shows an error toast and keeps the note unchanged when saving fails validation', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Original', 'content' => 'original']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->set('title', '')
+        ->call('saveNote', '<p>Should not persist</p>')
+        ->assertHasErrors('title')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'danger';
+        });
+
+    $this->assertDatabaseHas('notes', [
+        'id' => $note->id,
+        'title' => 'Original',
+        'content' => 'original',
+    ]);
+});
+
+test('shows a success toast when creating a note', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('createNote')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['slots']['text'] === 'Note created.'
+                && $params['dataset']['variant'] === 'success';
+        });
+});
+
+test('shows a success toast when uploading an attachment', function () {
+    notesTestTmpDisk();
+
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    $file = UploadedFile::fake()->createWithContent('doc.pdf', '%PDF-1.4 fake content');
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->set('attachment', $file)
+        ->call('uploadAttachment')
+        ->assertHasNoErrors()
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['slots']['text'] === 'Attachment uploaded.'
+                && $params['dataset']['variant'] === 'success';
+        });
+});
+
+test('shows an error toast when an attachment upload is rejected', function () {
+    notesTestTmpDisk();
+
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    $file = UploadedFile::fake()->create('malware.exe', 10);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->set('attachment', $file)
+        ->call('uploadAttachment')
+        ->assertHasErrors('attachment')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'danger';
+        });
+
+    $this->assertDatabaseCount('note_attachments', 0);
+});
+
+test('shows a success toast when deleting and restoring a note', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->call('deleteNote')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['slots']['text'] === 'Note moved to trash.';
+        });
+
+    Livewire::test('notes.index')
+        ->call('restoreNote', $note->id)
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['slots']['text'] === 'Note restored.';
+        });
+
+    $this->assertDatabaseHas('notes', ['id' => $note->id, 'deleted_at' => null]);
+});
