@@ -1,13 +1,13 @@
 # Project Status — Notes App
 
-Audited 2026-10-11 by direct repository inspection (lock files, migrations, models, routes, components, logs) plus a full test-suite run. Update this file when behavior changes.
+Audited 2026-10-11 by direct repository inspection (lock files, migrations, models, routes, components, logs) plus a full test-suite run. Behavior updated 2026-10-24 after folder management was built.
 
 ## Implemented & Verified
 
 - **Auth (starter kit + Fortify v1.39.0):** registration, login, email verification, password reset/confirm, 2FA with confirm + recovery codes, passkeys. Covered by `tests/Feature/Auth/*` and `tests/Feature/Settings/*`.
 - **Google OAuth (Socialite v5.31.0):** `/auth/google/redirect` + `/callback`; matches by `google_id`, falls back to email, links + verifies. Covered by `tests/Feature/Auth/GoogleControllerTest.php`. `google_id` is `#[Fillable]` (mass-assignable) and `#[Hidden]`.
-- **Default folders:** `UserObserver::created` seeds Work/School/Personal/Projects; registered once via `User::observe()` in `AppServiceProvider::boot()`. Proven working (a duplicate-name insert fails on `unique(user_id,name)` during tests).
-- **Notes (`Route::livewire('/notes', 'notes.index')`):** create/select/edit, folder filter + Trash, soft-delete/restore/force-delete, debounced live search (correctly parenthesized `LIKE` group), 4 sort orders, Tiptap rich-text editor. Covered by `tests/Feature/NotesTest.php` (save paths only).
+- **Default folders:** `UserObserver::created` seeds Work/School/Personal/Projects; registered once via `User::observe()` in `AppServiceProvider::boot()`. Folder names now use a per user unique normalized key.
+- **Notes (`Route::livewire('/notes', 'notes.index')`):** create/select/edit, folder filter + Trash, soft-delete/restore/force-delete, debounced live search (correctly parenthesized `LIKE` group), 4 sort orders, Tiptap rich-text editor. Covered by `tests/Feature/NotesTest.php`.
 - **Save-button fix (2026-10-11):** the Save button called `getContent()` outside its Alpine `x-data` scope (`ReferenceError`, see `storage/logs/browser.log`). Fixed with the `save-note-requested` window-event pattern; no layout or server change.
 - **Attachments:** validated upload (10 MB, explicit mimes) storing to `local` disk under `note-attachments/{userId}` + `NoteAttachment` row; owner-checked download route/controller (403/404). See "Incomplete" for the UI gap.
 - **Frontend built:** `public/build/manifest.json` exists; Vite 8.3.0, Tailwind 4.3.3, Tiptap 3.31.3.
@@ -21,6 +21,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 2. ~~**Observer cleanup**~~ — **DONE 2026-10-16.** Empty `updated/deleted/restored/forceDeleted` stubs removed; `created()` (folder seeding) kept. Seeding behavior already asserted via `RegistrationTest.php`.
 3. **`notes.version` column** exists (`default 1`) but is never read or incremented.
 4. ~~**Test gaps**~~ — **CLOSED 2026-10-12.** `NotesTest.php` now covers trash/restore/force-delete (+ cross-user restore isolation), folder filter, title+content search, and title A–Z sort; `RegistrationTest.php` asserts the 4 seeded folders via the real registration path.
+5. **Folder management:** create, rename, and delete actions and normalized per user name uniqueness are built and covered by tests. The migration passes in the test database but has not been applied to the persistent app database. The Alpha browser check remains open.
 
 ## Known Issues (ordered by severity)
 
@@ -30,14 +31,14 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 4. **Search `LIKE` does not escape `%`/`_`** — semantics only (searching `%` matches everything); the OR group scoping is correct, no leak.
 5. **Git object damage — REPAIRED 2026-10-11.** Thirteen zero-byte loose objects (incl. tip commit `80cca0c`, mtime 2026-10-09) broke `log`/`status` (`fatal: bad object HEAD`). Healed by deleting the 0-byte files and copying the healthy objects from a fresh GitHub clone (`cp -rn`, content-addressed so existing valid objects were untouched). `git fsck --full` is now clean (only harmless dangling blobs); `log`/`status` work. Remote `main` was byte-identical to the local tip, so nothing was lost. Root cause undetermined — likely interrupted write or WSL filesystem flakiness (same family as the sandbox-only `storage/framework/views/livewire/*` I/O errors).
 6. **Google OAuth callback has no throttle.** Acceptable while Google-verified emails only; revisit before broad exposure.
-7. **Could not verify in sandbox:** PHPStan level 7 — the sandbox analysis times out even when narrowed to `app/Models` + 2 controllers (confirmed 2026-10-16). **Run `composer types:check` on the dev machine.** Frontend builds also cannot run here: `npm run build` fails (`sh: 1: vp: Invalid argument` — the `vite-plus` `vp` symlink is unreadable through the mount) and `node node_modules/vite/bin/vite.js build` hangs. **Run `npm run dev`/`npm run build` on the dev machine** to pick up CSS/JS changes (e.g. the 2026-10-16 editor fix). PHP upload limits vs the 10 MB rule also unverified here.
+7. **Environment checks (updated 2026-10-24):** PHPStan and the frontend build both pass in this workspace. Browser preview of `/notes` redirects to login, so manual UI verification remains open. PHP upload limits versus the 10 MB rule are still unverified.
 
 ## Test Status
 
-- **Full suite: 63 passed / 158 assertions** (2026-10-16, `php:8.3-cli` container, in-memory SQLite). Supersedes earlier partial totals; covers all suites incl. notes, attachments, toasts, auth, settings.
+- **Full suite: 77 passed / 234 assertions** (2026-10-24, PHP 8.3.6, in-memory SQLite). Includes the folder management tests.
 - ~~`NotesTest.php` + `RegistrationTest.php`: 24 passed / 54 assertions (2026-10-12 file run)~~ — folded into the full-suite total above.
 - CI (`.github/workflows/tests.yml`): PHP 8.3 + Node 22, `composer setup` then `composer ci:check` (config:clear + pint + phpstan + tests).
-- Sandbox caveat: this agent environment has no PHP; container runs need `-e VIEW_COMPILED_PATH=/tmp/vc` because the sandbox mount cannot read `storage/framework/views/livewire/*`. Unnecessary on the dev machine, where the app renders normally.
+- Browser check remains pending because the local `/notes` route requires a signed in account.
 
 ## Recommended Next Tasks
 

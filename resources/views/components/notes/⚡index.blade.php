@@ -1,24 +1,45 @@
 <?php
 
+use App\Models\Folder;
 use App\Models\Note;
+use App\Models\User;
 use Flux\Flux;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Validation\Validator as ValidationValidator;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
-new class extends Component {
+new class extends Component
+{
     use WithFileUploads;
 
     public ?int $selectedFolderId = null;
+
     public ?int $selectedNoteId = null;
+
     public ?int $noteFolderId = null;
+
     public bool $isTrashView = false;
 
+    public bool $showFolderModal = false;
+
+    public string $folderName = '';
+
+    #[Locked]
+    public ?int $editingFolderId = null;
+
     public string $title = '';
+
     public string $content = '';
+
     public string $search = '';
+
     public string $sortBy = 'newest';
 
     public $attachment = null;
@@ -26,6 +47,147 @@ new class extends Component {
     public function selectFolder(?int $folderId): void
     {
         $this->selectedFolderId = $folderId;
+    }
+
+    public function openCreateFolderModal(): void
+    {
+        $this->editingFolderId = null;
+        $this->folderName = '';
+        $this->resetValidation('folderName');
+        $this->showFolderModal = true;
+    }
+
+    public function openRenameFolderModal(int $folderId): void
+    {
+        $folder = auth()->user()->folders()->findOrFail($folderId);
+
+        $this->editingFolderId = $folder->id;
+        $this->folderName = $folder->name;
+        $this->resetValidation('folderName');
+        $this->showFolderModal = true;
+    }
+
+    public function saveFolder(): void
+    {
+        $user = auth()->user();
+        $folder = $this->editingFolderId === null
+            ? null
+            : $user->folders()->findOrFail($this->editingFolderId);
+
+        try {
+            $name = $this->validatedFolderName($user, $folder);
+        } catch (ValidationException $exception) {
+            Flux::toast(variant: 'danger', text: __('Folder could not be saved. Check the highlighted field.'));
+
+            throw $exception;
+        }
+
+        $isCreating = $folder === null;
+
+        try {
+            if ($folder === null) {
+                $folder = $user->folders()->create(['name' => $name]);
+                $this->selectedFolderId = $folder->id;
+                $this->isTrashView = false;
+            } else {
+                $folder->update(['name' => $name]);
+            }
+        } catch (QueryException $exception) {
+            if (! $this->isFolderNameUniqueConflict($exception)) {
+                throw $exception;
+            }
+
+            $this->addError('folderName', __('A folder with this name already exists.'));
+            Flux::toast(variant: 'danger', text: __('Folder could not be saved. Check the highlighted field.'));
+
+            return;
+        }
+
+        $this->showFolderModal = false;
+        $this->folderName = '';
+        $this->editingFolderId = null;
+        $this->resetValidation('folderName');
+
+        Flux::toast(
+            variant: 'success',
+            text: $isCreating ? __('Folder created.') : __('Folder renamed.')
+        );
+    }
+
+    public function deleteFolder(int $folderId): void
+    {
+        $folder = auth()->user()->folders()->findOrFail($folderId);
+
+        $folder->delete();
+
+        $this->selectedFolderId = null;
+        $this->isTrashView = false;
+
+        if ($this->noteFolderId === $folder->id) {
+            $this->noteFolderId = null;
+        }
+
+        if ($this->editingFolderId === $folder->id) {
+            $this->editingFolderId = null;
+            $this->folderName = '';
+            $this->showFolderModal = false;
+            $this->resetValidation('folderName');
+        }
+
+        Flux::toast(variant: 'success', text: __('Folder deleted. Its notes remain in All Notes.'));
+    }
+
+    private function validatedFolderName(User $user, ?Folder $folder): string
+    {
+        $name = Folder::normalizeName($this->folderName);
+
+        $validator = Validator::make(
+            ['folderName' => $name],
+            ['folderName' => ['required', 'string', 'max:255']],
+            [
+                'folderName.required' => __('Enter a folder name.'),
+                'folderName.max' => __('Folder names cannot exceed 255 characters.'),
+            ],
+            ['folderName' => __('folder name')]
+        );
+
+        $validator->after(function (ValidationValidator $validator) use ($user, $folder, $name): void {
+            if ($validator->errors()->has('folderName')) {
+                return;
+            }
+
+            $folders = $user->folders()->where('name_key', Folder::nameKeyFor($name));
+
+            if ($folder !== null) {
+                $folders->where('id', '!=', $folder->id);
+            }
+
+            if ($folders->exists()) {
+                $validator->errors()->add('folderName', __('A folder with this name already exists.'));
+            }
+        });
+
+        $validator->validate();
+
+        return $name;
+    }
+
+    private function isFolderNameUniqueConflict(QueryException $exception): bool
+    {
+        $driver = DB::connection()->getDriverName();
+        $sqlState = $exception->errorInfo[0] ?? null;
+        $message = $exception->getMessage();
+
+        $isUniqueViolation = match ($driver) {
+            'pgsql' => $sqlState === '23505',
+            'mysql', 'mariadb', 'sqlite', 'sqlsrv' => $sqlState === '23000',
+            default => false,
+        };
+
+        return $isUniqueViolation && (
+            str_contains($message, 'folders_user_id_name_key_unique')
+            || str_contains($message, 'folders.user_id, folders.name_key')
+        );
     }
 
     public function selectNote(int $noteId): void
@@ -40,7 +202,7 @@ new class extends Component {
 
     public function saveNote(string $content = ''): void
     {
-        if (!$this->selectedNoteId) {
+        if (! $this->selectedNoteId) {
             return;
         }
 
@@ -80,7 +242,7 @@ new class extends Component {
 
     public function deleteNote(): void
     {
-        if (!$this->selectedNoteId) {
+        if (! $this->selectedNoteId) {
             return;
         }
 
@@ -138,7 +300,7 @@ new class extends Component {
 
     public function uploadAttachment(): void
     {
-        if (!$this->selectedNoteId) {
+        if (! $this->selectedNoteId) {
             return;
         }
 
@@ -154,7 +316,7 @@ new class extends Component {
 
         $file = $this->attachment;
 
-        $path = $file->store('note-attachments/' . auth()->id(), 'local');
+        $path = $file->store('note-attachments/'.auth()->id(), 'local');
 
         try {
             $note->attachments()->create([
@@ -177,7 +339,7 @@ new class extends Component {
 
     public function deleteAttachment(int $attachmentId): void
     {
-        if (!$this->selectedNoteId) {
+        if (! $this->selectedNoteId) {
             return;
         }
 
@@ -198,7 +360,7 @@ new class extends Component {
     {
         $user = auth()->user();
 
-        $folders = $user->folders()->orderBy('name')->get();
+        $folders = $user->folders()->orderBy('name_key')->get();
 
         $notesQuery = $user->notes();
 
@@ -209,7 +371,7 @@ new class extends Component {
         }
 
         if (trim($this->search) !== '') {
-            $search = '%' . trim($this->search) . '%';
+            $search = '%'.trim($this->search).'%';
 
             $notesQuery->where(function ($query) use ($search) {
                 $query->where('title', 'like', $search)->orWhere('content', 'like', $search);
@@ -238,7 +400,7 @@ new class extends Component {
 
         $selectedNote = null;
 
-        if ($this->selectedNoteId && !$this->isTrashView) {
+        if ($this->selectedNoteId && ! $this->isTrashView) {
             $selectedNote = $user->notes()->find($this->selectedNoteId);
         }
 
@@ -257,20 +419,48 @@ new class extends Component {
 
         {{-- Folders --}}
         <aside class="space-y-2">
-            <h2 class="text-lg font-semibold">
-                Folders
-            </h2>
+            <div class="flex items-center justify-between gap-2">
+                <h2 class="text-lg font-semibold">
+                    Folders
+                </h2>
+
+                <flux:button type="button" variant="ghost" size="sm" icon="plus"
+                    wire:click="openCreateFolderModal">
+                    {{ __('New folder') }}
+                </flux:button>
+            </div>
 
             <button wire:click="showNotes; selectFolder(null)"
-                class="block w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                @if ($selectedFolderId === null && !$isTrashView) aria-current="page" @endif
+                class="block w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 {{ $selectedFolderId === null && !$isTrashView ? 'bg-zinc-100 dark:bg-zinc-800' : '' }}">
                 All Notes
             </button>
 
             @foreach ($folders as $folder)
-                <button wire:click="showNotes; selectFolder({{ $folder->id }})"
-                    class="block w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                    {{ $folder->name }}
-                </button>
+                <div wire:key="folder-{{ $folder->id }}" class="flex items-center gap-1">
+                    <button type="button" wire:click="showNotes; selectFolder({{ $folder->id }})"
+                        @if ($selectedFolderId === $folder->id && !$isTrashView) aria-current="page" @endif
+                        class="block min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 {{ $selectedFolderId === $folder->id && !$isTrashView ? 'bg-zinc-100 dark:bg-zinc-800' : '' }}">
+                        {{ $folder->name }}
+                    </button>
+
+                    <flux:dropdown position="bottom" align="end">
+                        <flux:button type="button" variant="ghost" size="sm" icon="ellipsis-horizontal"
+                            aria-label="{{ __('Actions for :folder', ['folder' => $folder->name]) }}" />
+
+                        <flux:menu>
+                            <flux:menu.item as="button" wire:click="openRenameFolderModal({{ $folder->id }})">
+                                {{ __('Rename') }}
+                            </flux:menu.item>
+                            <flux:menu.separator />
+                            <flux:menu.item as="button" variant="danger"
+                                wire:click="deleteFolder({{ $folder->id }})"
+                                wire:confirm="{{ __('Permanently delete this folder? Its notes will remain in All Notes without a folder. This cannot be undone.') }}">
+                                {{ __('Delete') }}
+                            </flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
+                </div>
             @endforeach
 
             <button wire:click="showTrash"
@@ -611,4 +801,34 @@ new class extends Component {
         </main>
 
     </div>
+
+    <flux:modal name="manage-folder" wire:model="showFolderModal" class="min-w-0 w-full max-w-md">
+        <form wire:submit="saveFolder" class="space-y-6">
+            <div>
+                <flux:heading size="lg">
+                    {{ $editingFolderId === null ? __('Create a folder') : __('Rename folder') }}
+                </flux:heading>
+                <flux:subheading>
+                    {{ __('Folder names are unique within your account.') }}
+                </flux:subheading>
+            </div>
+
+            <flux:field>
+                <flux:label for="folder-name">{{ __('Folder name') }}</flux:label>
+                <flux:input id="folder-name" wire:model="folderName" autofocus />
+                <flux:error name="folderName" />
+            </flux:field>
+
+            <div class="flex flex-wrap justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button type="button" variant="ghost">
+                        {{ __('Cancel') }}
+                    </flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="saveFolder">
+                    {{ $editingFolderId === null ? __('Create folder') : __('Save changes') }}
+                </flux:button>
+            </div>
+        </form>
+    </flux:modal>
 </div>

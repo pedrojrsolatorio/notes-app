@@ -15,7 +15,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 2 | Note writing and rich text editing | Existing | existing |
 | 3 | Note organization, search, and recovery | Existing | existing |
 | 4 | File attachments | Existing | existing |
-| 5 | More flexible organization | Slice 1 | planned |
+| 5 | More flexible organization | Slice 1 | in-progress |
 | 6 | Quick capture | Slice 2 | planned |
 | 7 | Note import and export | Slice 3 | planned |
 | 8 | Offline use and device sync | Slice 4 | planned |
@@ -43,10 +43,18 @@ Code in `app/Models/NoteAttachment.php`, `app/Http/Controllers/NoteAttachmentCon
 
 ## Planned
 
-### 5. More flexible organization · planned · needs a decision
-Add useful ways to group and surface notes beyond the current folders, such as custom folders, labels, or pinned notes.
-**Done when:** you can organize and filter notes in the agreed ways, and quickly find the notes you need.
-- [ ] Design it (spec): `/architect more flexible organization`
+### 5. More flexible organization · in-progress
+Create, rename, and delete flat folders from the notes screen, while keeping notes safe and folder names unique within your account.
+**Done when:** you can manage your folders with clear validation, and deleting a folder leaves its notes available in All Notes.
+- [x] Design it (spec): `/architect more flexible organization`
+- [ ] Build it: `/develop more flexible organization`
+  - [ ] Add the normalized name key and collision safe migration (AC-3, AC-7)
+  - [x] Create folders with validation and selection behavior (AC-1, AC-3, AC-5, AC-6, AC-8)
+  - [x] Rename folders and preserve selection and ordering (AC-2, AC-3, AC-5, AC-6, AC-8)
+  - [x] Delete folders without losing notes or attachments (AC-4, AC-5, AC-8)
+- [ ] Verify it: `/check verify more flexible organization`
+spec [0001](../specs/0001-manage-note-folders/index.md)
+Code in `app/Models/Folder.php`, `database/migrations/2026_10_24_152100_add_name_key_to_folders_table.php`, and `resources/views/components/notes/⚡index.blade.php`.
 
 ### 6. Quick capture · planned · needs a decision
 Make it faster to save a thought without first going through the full note editing flow.

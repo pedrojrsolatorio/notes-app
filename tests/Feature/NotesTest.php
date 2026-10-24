@@ -2,7 +2,10 @@
 
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
@@ -142,6 +145,376 @@ test('filters notes by folder', function () {
         ->call('selectFolder', $folder->id)
         ->assertSee('Folder note')
         ->assertDontSee('Loose note');
+});
+
+test('creates a folder with a normalized name and keeps the open note state', function () {
+    $user = User::factory()->create();
+    $workFolder = $user->folders()->where('name', 'Work')->firstOrFail();
+    $schoolFolder = $user->folders()->where('name', 'School')->firstOrFail();
+    $note = $user->notes()->create([
+        'title' => 'Work note',
+        'content' => '<p>Saved content</p>',
+        'folder_id' => $workFolder->id,
+    ]);
+    $otherUser = User::factory()->create();
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('notes.index')
+        ->call('selectFolder', $schoolFolder->id)
+        ->call('selectNote', $note->id)
+        ->set('title', 'Unsaved title')
+        ->set('content', '<p>Unsaved editor content</p>')
+        ->call('openCreateFolderModal')
+        ->set('folderName', "\u{2003}Café\u{00A0}")
+        ->call('saveFolder')
+        ->assertHasNoErrors()
+        ->assertSet('showFolderModal', false)
+        ->assertSet('selectedNoteId', $note->id)
+        ->assertSet('noteFolderId', $workFolder->id)
+        ->assertSet('title', 'Unsaved title')
+        ->assertSet('content', '<p>Unsaved editor content</p>')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['slots']['text'] === 'Folder created.'
+                && $params['dataset']['variant'] === 'success';
+        });
+
+    $folder = $user->folders()->where('name', 'Café')->firstOrFail();
+
+    $this->assertDatabaseHas('folders', [
+        'id' => $folder->id,
+        'name' => 'Café',
+        'name_key' => 'café',
+    ]);
+    $this->assertDatabaseHas('notes', [
+        'id' => $note->id,
+        'title' => 'Work note',
+        'folder_id' => $workFolder->id,
+    ]);
+
+    $user->folders()->create(['name' => 'Cafe']);
+    $otherUser->folders()->create(['name' => 'Café']);
+
+    expect($component->get('selectedFolderId'))->toBe($folder->id);
+});
+
+test('rejects a folder name containing only Unicode whitespace', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('openCreateFolderModal')
+        ->set('folderName', "\u{3000}\t")
+        ->call('saveFolder')
+        ->assertHasErrors(['folderName' => 'required'])
+        ->assertSet('folderName', "\u{3000}\t")
+        ->assertSet('showFolderModal', true)
+        ->assertSee('Enter a folder name.')
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'danger';
+        })
+        ->assertNotDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'success';
+        });
+
+    $this->assertDatabaseCount('folders', 4);
+});
+
+test('accepts a folder name at the 255 character limit', function () {
+    $user = User::factory()->create();
+    $name = str_repeat('é', 255);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('openCreateFolderModal')
+        ->set('folderName', $name)
+        ->call('saveFolder')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseHas('folders', [
+        'user_id' => $user->id,
+        'name' => $name,
+        'name_key' => $name,
+    ]);
+});
+
+test('rejects a folder name over the 255 character limit', function () {
+    $user = User::factory()->create();
+    $name = str_repeat('é', 256);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('openCreateFolderModal')
+        ->set('folderName', $name)
+        ->call('saveFolder')
+        ->assertHasErrors(['folderName' => 'max'])
+        ->assertSet('folderName', $name)
+        ->assertSet('showFolderModal', true)
+        ->assertSee('Folder names cannot exceed 255 characters.');
+
+    $this->assertDatabaseCount('folders', 4);
+});
+
+test('rejects a folder name that differs only by capitalization', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('openCreateFolderModal')
+        ->set('folderName', 'wOrK')
+        ->call('saveFolder')
+        ->assertHasErrors('folderName')
+        ->assertSet('folderName', 'wOrK')
+        ->assertSet('showFolderModal', true)
+        ->assertSee('A folder with this name already exists.')
+        ->assertNotDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'success';
+        });
+
+    $this->assertDatabaseCount('folders', 4);
+});
+
+test('shows a database uniqueness conflict inline when a duplicate is inserted concurrently', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $component = Livewire::test('notes.index')
+        ->call('openCreateFolderModal')
+        ->set('folderName', 'Reading');
+
+    $insertedConflict = false;
+
+    DB::listen(function (QueryExecuted $query) use (&$insertedConflict, $user): void {
+        if (
+            $insertedConflict
+            || ! str_starts_with(strtolower(ltrim($query->sql)), 'select')
+            || ! str_contains($query->sql, 'name_key')
+        ) {
+            return;
+        }
+
+        $insertedConflict = true;
+
+        DB::table('folders')->insert([
+            'user_id' => $user->id,
+            'name' => 'Reading',
+            'name_key' => 'reading',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    $component
+        ->call('saveFolder')
+        ->assertHasErrors('folderName')
+        ->assertSet('folderName', 'Reading')
+        ->assertSet('showFolderModal', true)
+        ->assertDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'danger';
+        })
+        ->assertNotDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'success';
+        });
+
+    expect($insertedConflict)->toBeTrue();
+    $this->assertDatabaseCount('folders', 5);
+});
+
+test('renames a folder without changing its notes or selected folder', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Reading']);
+    $note = $user->notes()->create([
+        'title' => 'Book list',
+        'content' => '<p>Books</p>',
+        'folder_id' => $folder->id,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectFolder', $folder->id)
+        ->call('openRenameFolderModal', $folder->id)
+        ->assertSet('folderName', 'Reading')
+        ->set('folderName', '  Books  ')
+        ->call('saveFolder')
+        ->assertHasNoErrors()
+        ->assertSet('selectedFolderId', $folder->id)
+        ->assertSet('showFolderModal', false)
+        ->assertSee('Books');
+
+    $this->assertDatabaseHas('folders', [
+        'id' => $folder->id,
+        'name' => 'Books',
+        'name_key' => 'books',
+    ]);
+    $this->assertDatabaseHas('notes', [
+        'id' => $note->id,
+        'folder_id' => $folder->id,
+    ]);
+});
+
+test('rejects renaming a folder to another folders normalized name', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Reading']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectFolder', $folder->id)
+        ->call('openRenameFolderModal', $folder->id)
+        ->set('folderName', 'wOrK')
+        ->call('saveFolder')
+        ->assertHasErrors('folderName')
+        ->assertSet('selectedFolderId', $folder->id)
+        ->assertSet('folderName', 'wOrK')
+        ->assertSet('showFolderModal', true)
+        ->assertSee('A folder with this name already exists.')
+        ->assertNotDispatched('toast-show', function (string $name, array $params) {
+            return $params['dataset']['variant'] === 'success';
+        });
+
+    $this->assertDatabaseHas('folders', [
+        'id' => $folder->id,
+        'name' => 'Reading',
+        'name_key' => 'reading',
+    ]);
+});
+
+test('sorts folders by their normalized name key', function () {
+    $user = User::factory()->create();
+    $user->folders()->create(['name' => 'zebra']);
+    $user->folders()->create(['name' => 'aLPha']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->assertSeeInOrder(['All Notes', 'aLPha', 'Personal', 'Projects', 'School', 'Work', 'zebra']);
+});
+
+test('deletes a folder and keeps its notes and attachments in All Notes', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Reading']);
+    $note = $user->notes()->create([
+        'title' => 'Book list',
+        'content' => '<p>Books</p>',
+        'folder_id' => $folder->id,
+    ]);
+    $attachment = $note->attachments()->create([
+        'user_id' => $user->id,
+        'original_name' => 'reading.pdf',
+        'file_path' => 'note-attachments/'.$user->id.'/reading.pdf',
+        'mime_type' => 'application/pdf',
+        'file_size' => 100,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectFolder', $folder->id)
+        ->call('selectNote', $note->id)
+        ->assertSee('Permanently delete this folder? Its notes will remain in All Notes without a folder. This cannot be undone.')
+        ->set('title', 'Unsaved title')
+        ->call('deleteFolder', $folder->id)
+        ->assertSet('selectedFolderId', null)
+        ->assertSet('isTrashView', false)
+        ->assertSet('selectedNoteId', $note->id)
+        ->assertSet('noteFolderId', null);
+
+    $this->assertDatabaseHas('notes', [
+        'id' => $note->id,
+        'title' => 'Book list',
+        'content' => '<p>Books</p>',
+        'folder_id' => null,
+    ]);
+    $this->assertDatabaseHas('note_attachments', ['id' => $attachment->id]);
+});
+
+test('cannot rename another users folder', function () {
+    $owner = User::factory()->create();
+    $intruder = User::factory()->create();
+    $folder = $owner->folders()->create(['name' => 'Private']);
+    $this->actingAs($intruder);
+
+    try {
+        Livewire::test('notes.index')->call('openRenameFolderModal', $folder->id);
+
+        $this->fail('Renaming another users folder should fail.');
+    } catch (ModelNotFoundException) {
+        expect($folder->fresh()->name)->toBe('Private');
+    }
+});
+
+test('cannot delete another users folder', function () {
+    $owner = User::factory()->create();
+    $intruder = User::factory()->create();
+    $folder = $owner->folders()->create(['name' => 'Private']);
+    $this->actingAs($intruder);
+
+    try {
+        Livewire::test('notes.index')->call('deleteFolder', $folder->id);
+
+        $this->fail('Deleting another users folder should fail.');
+    } catch (ModelNotFoundException) {
+        $this->assertDatabaseHas('folders', ['id' => $folder->id, 'name' => 'Private']);
+    }
+});
+
+test('backfills folder name keys without changing existing display names', function () {
+    $user = User::factory()->create();
+    $migration = require database_path('migrations/2026_10_24_152100_add_name_key_to_folders_table.php');
+
+    $migration->down();
+
+    $folderId = DB::table('folders')->insertGetId([
+        'user_id' => $user->id,
+        'name' => "  Café\u{00A0}",
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $migration->up();
+
+    $this->assertDatabaseHas('folders', [
+        'id' => $folderId,
+        'name' => "  Café\u{00A0}",
+        'name_key' => 'café',
+    ]);
+});
+
+test('stops the folder name migration before schema changes when existing names collide', function () {
+    $user = User::factory()->create();
+    $migration = require database_path('migrations/2026_10_24_152100_add_name_key_to_folders_table.php');
+
+    $migration->down();
+
+    $firstFolderId = DB::table('folders')->insertGetId([
+        'user_id' => $user->id,
+        'name' => 'Travel',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $secondFolderId = DB::table('folders')->insertGetId([
+        'user_id' => $user->id,
+        'name' => ' travel ',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    try {
+        $migration->up();
+
+        $this->fail('The migration should stop when existing names collide.');
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toContain('No schema or data changes were made.');
+    }
+
+    expect(Schema::hasColumn('folders', 'name_key'))->toBeFalse();
+    $this->assertDatabaseHas('folders', ['id' => $firstFolderId, 'name' => 'Travel']);
+    $this->assertDatabaseHas('folders', ['id' => $secondFolderId, 'name' => ' travel ']);
 });
 
 test('searches notes by title and content', function () {
