@@ -19,7 +19,7 @@ test('creates an account linked to google on first google login', function () {
 
     $response = $this->get(route('google.callback', ['code' => 'google-auth-code']));
 
-    $response->assertRedirect(route('dashboard', absolute: false));
+    $response->assertRedirect(route('notes.index', absolute: false));
 
     $this->assertAuthenticated();
 
@@ -51,7 +51,7 @@ test('links google to an existing account with the same email', function () {
 
     $response = $this->get(route('google.callback', ['code' => 'google-auth-code']));
 
-    $response->assertRedirect(route('dashboard', absolute: false));
+    $response->assertRedirect(route('notes.index', absolute: false));
 
     $this->assertAuthenticatedAs($user->fresh());
 
@@ -83,7 +83,7 @@ test('marks an existing google account as verified when it signs in', function (
     Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
 
     $this->get(route('google.callback', ['code' => 'google-auth-code']))
-        ->assertRedirect(route('dashboard', absolute: false));
+        ->assertRedirect(route('notes.index', absolute: false));
 
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
 });
