@@ -147,7 +147,34 @@ test('filters notes by folder', function () {
         ->assertDontSee('Loose note');
 });
 
-test('creates a folder with a normalized name and keeps the open note state', function () {
+test('[AC-5] redirects guests from the notes page to login', function () {
+    $this->get('/notes')->assertRedirect(route('login'));
+});
+
+test('[AC-5] redirects unverified users from the notes page to email verification', function () {
+    $user = User::factory()->unverified()->create();
+
+    $this->actingAs($user)
+        ->get('/notes')
+        ->assertRedirect(route('verification.notice'));
+});
+
+test('[AC-3] displays folder names as escaped text', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $name = '<script>alert("xss")</script>';
+
+    Livewire::test('notes.index')
+        ->call('openCreateFolderModal')
+        ->set('folderName', $name)
+        ->call('saveFolder')
+        ->assertHasNoErrors()
+        ->assertSee($name)
+        ->assertDontSee($name, false);
+});
+
+test('[AC-1, AC-3, AC-6] creates a normalized empty folder and keeps the open note state', function () {
     $user = User::factory()->create();
     $workFolder = $user->folders()->where('name', 'Work')->firstOrFail();
     $schoolFolder = $user->folders()->where('name', 'School')->firstOrFail();
@@ -193,12 +220,19 @@ test('creates a folder with a normalized name and keeps the open note state', fu
     ]);
 
     $user->folders()->create(['name' => 'Cafe']);
-    $otherUser->folders()->create(['name' => 'Café']);
+    $otherUserFolder = $otherUser->folders()->create(['name' => 'Café']);
+
+    $this->assertDatabaseHas('folders', [
+        'id' => $otherUserFolder->id,
+        'user_id' => $otherUser->id,
+        'name' => 'Café',
+        'name_key' => 'café',
+    ]);
 
     expect($component->get('selectedFolderId'))->toBe($folder->id);
 });
 
-test('rejects a folder name containing only Unicode whitespace', function () {
+test('[AC-3] rejects a folder name containing only Unicode whitespace', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
@@ -221,7 +255,7 @@ test('rejects a folder name containing only Unicode whitespace', function () {
     $this->assertDatabaseCount('folders', 4);
 });
 
-test('accepts a folder name at the 255 character limit', function () {
+test('[AC-3] accepts a folder name at the 255 code point limit', function () {
     $user = User::factory()->create();
     $name = str_repeat('é', 255);
 
@@ -240,7 +274,7 @@ test('accepts a folder name at the 255 character limit', function () {
     ]);
 });
 
-test('rejects a folder name over the 255 character limit', function () {
+test('[AC-3] rejects a folder name over the 255 code point limit', function () {
     $user = User::factory()->create();
     $name = str_repeat('é', 256);
 
@@ -258,7 +292,7 @@ test('rejects a folder name over the 255 character limit', function () {
     $this->assertDatabaseCount('folders', 4);
 });
 
-test('rejects a folder name that differs only by capitalization', function () {
+test('[AC-3] rejects a folder name that differs only by capitalization', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
@@ -278,7 +312,7 @@ test('rejects a folder name that differs only by capitalization', function () {
     $this->assertDatabaseCount('folders', 4);
 });
 
-test('shows a database uniqueness conflict inline when a duplicate is inserted concurrently', function () {
+test('[AC-3] shows a database uniqueness conflict inline when a duplicate is inserted concurrently', function () {
     $user = User::factory()->create();
     $this->actingAs($user);
 
@@ -324,9 +358,9 @@ test('shows a database uniqueness conflict inline when a duplicate is inserted c
     $this->assertDatabaseCount('folders', 5);
 });
 
-test('renames a folder without changing its notes or selected folder', function () {
+test('[AC-2, AC-6] renames a starter folder without changing its notes or selection', function () {
     $user = User::factory()->create();
-    $folder = $user->folders()->create(['name' => 'Reading']);
+    $folder = $user->folders()->where('name', 'Work')->firstOrFail();
     $note = $user->notes()->create([
         'title' => 'Book list',
         'content' => '<p>Books</p>',
@@ -338,7 +372,7 @@ test('renames a folder without changing its notes or selected folder', function 
     Livewire::test('notes.index')
         ->call('selectFolder', $folder->id)
         ->call('openRenameFolderModal', $folder->id)
-        ->assertSet('folderName', 'Reading')
+        ->assertSet('folderName', 'Work')
         ->set('folderName', '  Books  ')
         ->call('saveFolder')
         ->assertHasNoErrors()
@@ -357,7 +391,7 @@ test('renames a folder without changing its notes or selected folder', function 
     ]);
 });
 
-test('rejects renaming a folder to another folders normalized name', function () {
+test('[AC-2, AC-3] rejects renaming a folder to another folders normalized name', function () {
     $user = User::factory()->create();
     $folder = $user->folders()->create(['name' => 'Reading']);
 
@@ -384,7 +418,7 @@ test('rejects renaming a folder to another folders normalized name', function ()
     ]);
 });
 
-test('sorts folders by their normalized name key', function () {
+test('[AC-6] sorts folders by their normalized name key', function () {
     $user = User::factory()->create();
     $user->folders()->create(['name' => 'zebra']);
     $user->folders()->create(['name' => 'aLPha']);
@@ -395,9 +429,9 @@ test('sorts folders by their normalized name key', function () {
         ->assertSeeInOrder(['All Notes', 'aLPha', 'Personal', 'Projects', 'School', 'Work', 'zebra']);
 });
 
-test('deletes a folder and keeps its notes and attachments in All Notes', function () {
+test('[AC-4, AC-6] deletes a starter folder and keeps its notes and attachments in All Notes', function () {
     $user = User::factory()->create();
-    $folder = $user->folders()->create(['name' => 'Reading']);
+    $folder = $user->folders()->where('name', 'Work')->firstOrFail();
     $note = $user->notes()->create([
         'title' => 'Book list',
         'content' => '<p>Books</p>',
@@ -433,7 +467,7 @@ test('deletes a folder and keeps its notes and attachments in All Notes', functi
     $this->assertDatabaseHas('note_attachments', ['id' => $attachment->id]);
 });
 
-test('cannot rename another users folder', function () {
+test('[AC-5] cannot rename another users folder', function () {
     $owner = User::factory()->create();
     $intruder = User::factory()->create();
     $folder = $owner->folders()->create(['name' => 'Private']);
@@ -448,7 +482,7 @@ test('cannot rename another users folder', function () {
     }
 });
 
-test('cannot delete another users folder', function () {
+test('[AC-5] cannot delete another users folder', function () {
     $owner = User::factory()->create();
     $intruder = User::factory()->create();
     $folder = $owner->folders()->create(['name' => 'Private']);
@@ -463,7 +497,7 @@ test('cannot delete another users folder', function () {
     }
 });
 
-test('backfills folder name keys without changing existing display names', function () {
+test('[AC-7] backfills folder name keys without changing existing display names', function () {
     $user = User::factory()->create();
     $migration = require database_path('migrations/2026_10_24_152100_add_name_key_to_folders_table.php');
 
@@ -485,7 +519,7 @@ test('backfills folder name keys without changing existing display names', funct
     ]);
 });
 
-test('stops the folder name migration before schema changes when existing names collide', function () {
+test('[AC-7] stops the folder name migration before schema changes when existing names collide', function () {
     $user = User::factory()->create();
     $migration = require database_path('migrations/2026_10_24_152100_add_name_key_to_folders_table.php');
 

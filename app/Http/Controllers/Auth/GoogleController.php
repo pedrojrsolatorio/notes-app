@@ -29,17 +29,19 @@ class GoogleController extends Controller
             if ($user) {
                 $user->update([
                     'google_id' => $googleUser->getId(),
-                    'email_verified_at' => $user->email_verified_at ?? now(),
                 ]);
             } else {
                 $user = User::create([
                     'name' => $googleUser->getName() ?? $googleUser->getNickname() ?? 'Google User',
                     'email' => $googleUser->getEmail(),
                     'google_id' => $googleUser->getId(),
-                    'email_verified_at' => now(),
                     'password' => Hash::make(Str::random(40)),
                 ]);
             }
+        }
+
+        if (! $user->hasVerifiedEmail()) {
+            $user->markEmailAsVerified();
         }
 
         Auth::login($user, remember: true);

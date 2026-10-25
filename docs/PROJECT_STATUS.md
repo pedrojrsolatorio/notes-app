@@ -1,11 +1,12 @@
 # Project Status — Notes App
 
-Audited 2026-10-11 by direct repository inspection (lock files, migrations, models, routes, components, logs) plus a full test-suite run. Behavior updated 2026-10-24 after folder management was built.
+Audited 2026-10-11 by direct repository inspection (lock files, migrations, models, routes, components, logs) plus a full test-suite run. Behavior updated 2026-10-25 after folder management and email verification enforcement changes.
 
 ## Implemented & Verified
 
 - **Auth (starter kit + Fortify v1.39.0):** registration, login, email verification, password reset/confirm, 2FA with confirm + recovery codes, passkeys. Covered by `tests/Feature/Auth/*` and `tests/Feature/Settings/*`.
-- **Google OAuth (Socialite v5.31.0):** `/auth/google/redirect` + `/callback`; matches by `google_id`, falls back to email, links + verifies. Covered by `tests/Feature/Auth/GoogleControllerTest.php`. `google_id` is `#[Fillable]` (mass-assignable) and `#[Hidden]`.
+- **Email verification enforcement:** `User` implements Laravel's `MustVerifyEmail` contract, so the existing `verified` route middleware now redirects unverified manual registrations. Fortify sends their verification email; Google OAuth accounts remain verified. Covered by auth and notes route tests.
+- **Google OAuth (Socialite v5.31.0):** registration and login pages offer Google OAuth; `/auth/google/redirect` + `/callback` matches by `google_id`, falls back to email, links + verifies. Covered by `tests/Feature/Auth/GoogleControllerTest.php`. `google_id` is `#[Fillable]` (mass-assignable) and `#[Hidden]`.
 - **Default folders:** `UserObserver::created` seeds Work/School/Personal/Projects; registered once via `User::observe()` in `AppServiceProvider::boot()`. Folder names now use a per user unique normalized key.
 - **Notes (`Route::livewire('/notes', 'notes.index')`):** create/select/edit, folder filter + Trash, soft-delete/restore/force-delete, debounced live search (correctly parenthesized `LIKE` group), 4 sort orders, Tiptap rich-text editor. Covered by `tests/Feature/NotesTest.php`.
 - **Save-button fix (2026-10-11):** the Save button called `getContent()` outside its Alpine `x-data` scope (`ReferenceError`, see `storage/logs/browser.log`). Fixed with the `save-note-requested` window-event pattern; no layout or server change.
@@ -35,7 +36,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 
 ## Test Status
 
-- **Full suite: 77 passed / 234 assertions** (2026-10-24, PHP 8.3.6, in-memory SQLite). Includes the folder management tests.
+- **Full suite: 84 passed / 252 assertions** (2026-10-25, PHP 8.3.6, in-memory SQLite). Includes folder management and email verification enforcement tests.
 - ~~`NotesTest.php` + `RegistrationTest.php`: 24 passed / 54 assertions (2026-10-12 file run)~~ — folded into the full-suite total above.
 - CI (`.github/workflows/tests.yml`): PHP 8.3 + Node 22, `composer setup` then `composer ci:check` (config:clear + pint + phpstan + tests).
 - Browser check remains pending because the local `/notes` route requires a signed in account.
