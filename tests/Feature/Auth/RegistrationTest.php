@@ -18,7 +18,7 @@ test('registration screen can be rendered', function () {
 test('registration screen links to google signup', function () {
     $this->get(route('register'))
         ->assertSee('Sign up with Google')
-        ->assertSee('href="'.route('google.redirect').'"', false);
+        ->assertSee('href="'.route('google.redirect', ['return' => 'register']).'"', false);
 });
 
 test('new users can register', function () {

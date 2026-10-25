@@ -17,7 +17,7 @@ test('creates an account linked to google on first google login', function () {
 
     Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
 
-    $response = $this->get(route('google.callback'));
+    $response = $this->get(route('google.callback', ['code' => 'google-auth-code']));
 
     $response->assertRedirect(route('dashboard', absolute: false));
 
@@ -49,7 +49,7 @@ test('links google to an existing account with the same email', function () {
 
     Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
 
-    $response = $this->get(route('google.callback'));
+    $response = $this->get(route('google.callback', ['code' => 'google-auth-code']));
 
     $response->assertRedirect(route('dashboard', absolute: false));
 
@@ -82,8 +82,40 @@ test('marks an existing google account as verified when it signs in', function (
 
     Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
 
-    $this->get(route('google.callback'))
+    $this->get(route('google.callback', ['code' => 'google-auth-code']))
         ->assertRedirect(route('dashboard', absolute: false));
 
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
+});
+
+test('returns to signup when google authorization is canceled', function () {
+    $provider = Mockery::mock(SocialiteProvider::class);
+    $provider->shouldReceive('redirect')->andReturn(redirect('https://accounts.google.com'));
+    $provider->shouldNotReceive('user');
+
+    Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
+
+    $this->get(route('google.redirect', ['return' => 'register']))
+        ->assertRedirect('https://accounts.google.com')
+        ->assertSessionHas('google_auth_return_to', 'register');
+
+    $this->get(route('google.callback', ['error' => 'access_denied']))
+        ->assertRedirect(route('register', absolute: false))
+        ->assertSessionHas('status', 'Google sign in was cancelled.');
+});
+
+test('returns to login when google callback has no authorization code', function () {
+    $provider = Mockery::mock(SocialiteProvider::class);
+    $provider->shouldReceive('redirect')->andReturn(redirect('https://accounts.google.com'));
+    $provider->shouldNotReceive('user');
+
+    Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
+
+    $this->get(route('google.redirect', ['return' => 'login']))
+        ->assertRedirect('https://accounts.google.com')
+        ->assertSessionHas('google_auth_return_to', 'login');
+
+    $this->get(route('google.callback'))
+        ->assertRedirect(route('login', absolute: false))
+        ->assertSessionHas('status', 'Google sign in was cancelled.');
 });

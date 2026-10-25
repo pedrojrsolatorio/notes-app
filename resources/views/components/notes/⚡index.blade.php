@@ -34,6 +34,9 @@ new class extends Component
     #[Locked]
     public ?int $editingFolderId = null;
 
+    #[Locked]
+    public int $attachmentValidationAttempt = 0;
+
     public string $title = '';
 
     public string $content = '';
@@ -307,6 +310,7 @@ new class extends Component
         try {
             $this->validate($this->attachmentValidationRules());
         } catch (ValidationException $e) {
+            $this->attachmentValidationAttempt++;
             Flux::toast(variant: 'danger', text: __('Attachment could not be uploaded. Check the highlighted field.'));
 
             throw $e;
@@ -741,19 +745,19 @@ new class extends Component
                         </h3>
 
                         <div class="mb-4 overflow-hidden rounded-lg border border-zinc-200">
-                            @forelse ($selectedNote->attachments as $attachment)
+                            @forelse ($selectedNote->attachments as $noteAttachment)
                                 <div class="flex items-center justify-between gap-3 p-3 {{ !$loop->last ? 'border-b border-zinc-200' : '' }}">
                                     <div class="min-w-0">
-                                        <p class="truncate text-sm font-medium">{{ $attachment->original_name }}</p>
-                                        <p class="text-xs text-zinc-500">{{ number_format($attachment->file_size / 1024, 1) }} KB</p>
+                                        <p class="truncate text-sm font-medium">{{ $noteAttachment->original_name }}</p>
+                                        <p class="text-xs text-zinc-500">{{ number_format($noteAttachment->file_size / 1024, 1) }} KB</p>
                                     </div>
 
                                     <div class="flex shrink-0 items-center gap-2">
-                                        <a href="{{ route('note-attachments.download', $attachment) }}"
+                                        <a href="{{ route('note-attachments.download', $noteAttachment) }}"
                                             class="rounded-lg border px-3 py-1 text-sm font-medium">
                                             Download
                                         </a>
-                                        <button type="button" wire:click="deleteAttachment({{ $attachment->id }})"
+                                        <button type="button" wire:click="deleteAttachment({{ $noteAttachment->id }})"
                                             wire:confirm="Delete this attachment?"
                                             class="rounded-lg border border-red-200 px-3 py-1 text-sm font-medium text-red-600">
                                             Delete
@@ -767,6 +771,7 @@ new class extends Component
 
                         <form wire:submit="uploadAttachment" class="flex flex-wrap items-center gap-3">
                             <input type="file" wire:model="attachment"
+                                x-on:cancel="$wire.removeUpload('attachment', @js($attachment?->getFilename()))"
                                 accept=".pdf,.doc,.docx,.txt,.rtf,.odt,.xls,.xlsx,.ppt,.pptx,.csv,.jpg,.jpeg,.png"
                                 class="block max-w-full text-sm text-zinc-600" />
 
@@ -782,7 +787,12 @@ new class extends Component
                         </div>
 
                         @error('attachment')
-                            <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
+                            <p wire:key="attachment-validation-{{ $attachmentValidationAttempt }}"
+                                x-data="{ visible: true }"
+                                x-init="setTimeout(() => visible = false, 5000)"
+                                x-show="visible"
+                                x-transition.opacity
+                                class="mt-2 text-sm text-red-600">{{ $message }}</p>
                         @enderror
                     </div>
 

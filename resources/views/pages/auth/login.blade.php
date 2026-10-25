@@ -48,7 +48,7 @@
             </div>
         </div>
 
-        <a href="{{ route('google.redirect') }}"
+        <a href="{{ route('google.redirect', ['return' => 'login']) }}"
             class="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800">
             <svg class="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="currentColor"

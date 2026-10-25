@@ -680,6 +680,47 @@ test('rejects an upload with a disallowed file type', function () {
     $this->assertDatabaseCount('note_attachments', 0);
 });
 
+test('includes the queued upload in the file picker cancel handler', function () {
+    notesTestTmpDisk();
+
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
+    $note->attachments()->create([
+        'user_id' => $user->id,
+        'original_name' => 'existing.pdf',
+        'file_path' => 'note-attachments/'.$user->id.'/existing.pdf',
+        'mime_type' => 'application/pdf',
+        'file_size' => 100,
+    ]);
+    $this->actingAs($user);
+
+    $file = UploadedFile::fake()->createWithContent('doc.pdf', '%PDF-1.4 fake content');
+
+    $component = Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->set('attachment', $file);
+    $temporaryFilename = $component->get('attachment')->getFilename();
+
+    $component->assertSeeHtml(
+        'x-on:cancel="$wire.removeUpload(\'attachment\', \''.$temporaryFilename.'\')"'
+    );
+});
+
+test('fades the required attachment error after it is displayed', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->call('uploadAttachment')
+        ->assertHasErrors('attachment')
+        ->assertSet('attachmentValidationAttempt', 1)
+        ->assertSee('The attachment field is required.')
+        ->assertSeeHtml('x-init="setTimeout(() => visible = false, 5000)"')
+        ->assertSeeHtml('x-show="visible"');
+});
+
 test('rejects an upload exceeding the size limit', function () {
     notesTestTmpDisk();
 
