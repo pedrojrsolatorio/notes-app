@@ -16,7 +16,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 3 | Note organization, search, and recovery | Existing | existing |
 | 4 | File attachments | Existing | existing |
 | 5 | More flexible organization | Slice 1 | in-progress |
-| 6 | Quick capture | Slice 2 | planned |
+| 6 | Quick capture | Slice 2 | in-progress |
 | 7 | Note import and export | Slice 3 | planned |
 | 8 | Offline use and device sync | Slice 4 | planned |
 | 9 | Note reminders | Slice 5 | planned |
@@ -56,10 +56,16 @@ Create, rename, and delete flat folders from the notes screen, while keeping not
 spec [0001](../specs/0001-manage-note-folders/index.md)
 Code in `app/Models/Folder.php`, `database/migrations/2026_10_24_152100_add_name_key_to_folders_table.php`, and `resources/views/components/notes/⚡index.blade.php`.
 
-### 6. Quick capture · planned · needs a decision
+### 6. Quick capture · in-progress
 Make it faster to save a thought without first going through the full note editing flow.
 **Done when:** you can start a note quickly with keyboard and touch, then find it in your notes.
-- [ ] Design it (spec): `/architect quick capture`
+- [x] Design it (spec): `/architect quick capture`
+- [ ] Build it: `/develop quick capture`
+  - [ ] Add the capture modal, text rule, and save path (AC-1, AC-2, AC-3, AC-7, AC-8, AC-11, AC-12)
+  - [ ] Add the N shortcut, tooltip, and footer hints (AC-4, AC-10)
+  - [ ] Add the floating trigger, Trash guards, and failure path (AC-5, AC-6, AC-9, AC-10)
+- [ ] Verify it: `/check verify quick capture`
+spec [0002](../specs/0002-quick-capture/index.md)
 
 ### 7. Note import and export · planned · Beta · needs a decision
 Let you keep a usable copy of your notes outside the app and restore notes when needed.
@@ -90,6 +96,7 @@ Keep browsing and searching comfortable as your collection becomes larger.
 
 - Shared notes, collaboration, and public publishing are outside the private solo use planned here.
 - Product analytics, paid plans, and multiple language support are not needed for the current personal use goal.
+- Global quick capture from the dashboard and profile is a later extension of Quick capture, after the notes page version is verified.
 
 ## Legend
 
