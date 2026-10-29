@@ -60,12 +60,13 @@ Code in `app/Models/Folder.php`, `database/migrations/2026_10_24_152100_add_name
 Make it faster to save a thought without first going through the full note editing flow.
 **Done when:** you can start a note quickly with keyboard and touch, then find it in your notes.
 - [x] Design it (spec): `/architect quick capture`
-- [ ] Build it: `/develop quick capture`
-  - [ ] Add the capture modal, text rule, and save path (AC-1, AC-2, AC-3, AC-7, AC-8, AC-11, AC-12)
-  - [ ] Add the N shortcut, tooltip, and footer hints (AC-4, AC-10)
-  - [ ] Add the floating trigger, Trash guards, and failure path (AC-5, AC-6, AC-9, AC-10)
+- [x] Build it: `/develop quick capture`
+  - [x] Add the capture modal, text rule, and save path (AC-1, AC-2, AC-3, AC-7, AC-8, AC-11, AC-12)
+  - [x] Add the N shortcut, tooltip, and footer hints (AC-4, AC-10)
+  - [x] Add the floating trigger, Trash guards, and failure path (AC-5, AC-6, AC-9, AC-10)
 - [ ] Verify it: `/check verify quick capture`
 spec [0002](../specs/0002-quick-capture/index.md)
+Code in `resources/views/components/notes/⚡index.blade.php` and `tests/Feature/QuickCaptureTest.php`.
 
 ### 7. Note import and export · planned · Beta · needs a decision
 Let you keep a usable copy of your notes outside the app and restore notes when needed.

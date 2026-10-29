@@ -1,7 +1,7 @@
 # 0002. Quick capture
 
 **Date**: 2026-10-28
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 
@@ -153,9 +153,9 @@ The automated suite covers the happy paths, the text rule, storage, escaping, ow
 
 The Tracer Bullet approach starts with one complete path from the trigger to a saved note, then adds the keyboard and touch entry points, then the edge and failure handling. There is no migration because the note table already fits.
 
-1. Build the thin path end to end in `resources/views/components/notes/⚡index.blade.php`: add the modal properties, `openQuickCapture()`, `closeQuickCapture()`, `saveQuickCapture()`, the Flux modal with a labeled `flux:textarea` and `autofocus`, the helper message, the inline error, Cancel and Save controls, and the header trigger. Implement the exact text rule, the escaped paragraph conversion, the create through the signed in user, the All Notes reset, the close, the success toast, the single submit path with the in flight flag, and the preview entity decode. Give validation errors inline feedback only. Add focused Pest coverage in `tests/Feature/QuickCaptureTest.php`. Satisfies **AC-1**, **AC-2**, **AC-3**, **AC-7**, **AC-8**, **AC-11**, **AC-12**.
-2. Add the N key listener with its guard for `dialog[open]`, open popovers, fields, content editable regions, modifiers, key repeat, composition, and Trash. Use `event.key` and never `event.code`. Add the `flux:tooltip` with `kbd="N"` to the header trigger and the two `<kbd>` hints to the modal footer. Satisfies **AC-4**, **AC-10**.
-3. Add the floating trigger at the bottom right for widths below `md`, hide the header trigger there, add the Trash guards to both open and save, close the modal on Trash entry, add the failure path that keeps the draft open with a danger toast, and run the keyboard and responsive checks. Satisfies **AC-5**, **AC-6**, **AC-9**, **AC-10**.
+- [x] 1. Build the thin path end to end in `resources/views/components/notes/⚡index.blade.php`: add the modal properties, `openQuickCapture()`, `closeQuickCapture()`, `saveQuickCapture()`, the Flux modal with a labeled `flux:textarea` and `autofocus`, the helper message, the inline error, Cancel and Save controls, and the header trigger. Implement the exact text rule, the escaped paragraph conversion, the create through the signed in user, the All Notes reset, the close, the success toast, the single submit path with the in flight flag, and the preview entity decode. Give validation errors inline feedback only. Add focused Pest coverage in `tests/Feature/QuickCaptureTest.php`. Satisfies **AC-1**, **AC-2**, **AC-3**, **AC-7**, **AC-8**, **AC-11**, **AC-12**.
+- [x] 2. Add the N key listener with its guard for `dialog[open]`, open popovers, fields, content editable regions, modifiers, key repeat, composition, and Trash. Use `event.key` and never `event.code`. Add the `flux:tooltip` with `kbd="N"` to the header trigger and the two `<kbd>` hints to the modal footer. Satisfies **AC-4**, **AC-10**.
+- [x] 3. Add the floating trigger at the bottom right for widths below `md`, hide the header trigger there, add the Trash guards to both open and save, close the modal on Trash entry, add the failure path that keeps the draft open with a danger toast, and run the keyboard and responsive checks. Satisfies **AC-5**, **AC-6**, **AC-9**, **AC-10**.
 
 ## Consequences
 

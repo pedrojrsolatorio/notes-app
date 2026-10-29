@@ -45,6 +45,10 @@ new class extends Component
 
     public string $sortBy = 'newest';
 
+    public bool $showQuickCaptureModal = false;
+
+    public string $quickCaptureText = '';
+
     public $attachment = null;
 
     public function selectFolder(?int $folderId): void
@@ -243,6 +247,109 @@ new class extends Component
         Flux::toast(variant: 'success', text: __('Note created.'));
     }
 
+    public function openQuickCapture(): void
+    {
+        if ($this->isTrashView) {
+            return;
+        }
+
+        $this->quickCaptureText = '';
+        $this->resetValidation('quickCaptureText');
+        $this->showQuickCaptureModal = true;
+    }
+
+    public function closeQuickCapture(): void
+    {
+        $this->showQuickCaptureModal = false;
+        $this->quickCaptureText = '';
+        $this->resetValidation('quickCaptureText');
+    }
+
+    public function saveQuickCapture(): void
+    {
+        if ($this->isTrashView) {
+            return;
+        }
+
+        $this->validate(
+            ['quickCaptureText' => ['required', 'string']],
+            ['quickCaptureText.required' => __('Write something to capture.')]
+        );
+
+        $text = $this->normalizeQuickCaptureText($this->quickCaptureText);
+
+        if ($text === '') {
+            $this->addError('quickCaptureText', __('Write something to capture.'));
+
+            return;
+        }
+
+        [$title, $body] = $this->splitQuickCaptureText($text);
+
+        try {
+            auth()->user()->notes()->create([
+                'title' => $title,
+                'content' => $this->quickCaptureHtml($body),
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+            Flux::toast(variant: 'danger', text: __('Note could not be captured. Your text is still here.'));
+
+            return;
+        }
+
+        $this->showQuickCaptureModal = false;
+        $this->quickCaptureText = '';
+        $this->resetValidation('quickCaptureText');
+        $this->selectedFolderId = null;
+        $this->search = '';
+        $this->sortBy = 'newest';
+
+        Flux::toast(variant: 'success', text: __('Note captured.'));
+    }
+
+    private function normalizeQuickCaptureText(string $text): string
+    {
+        $normalized = preg_replace(
+            '/\A[\p{Z}\x{0009}-\x{000D}\x{0085}]+|[\p{Z}\x{0009}-\x{000D}\x{0085}]+\z/u',
+            '',
+            str_replace(["\r\n", "\r"], "\n", $text)
+        );
+
+        return $normalized ?? '';
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function splitQuickCaptureText(string $text): array
+    {
+        $parts = explode("\n", $text, 2);
+
+        $firstLine = $this->normalizeQuickCaptureText($parts[0]);
+        $title = mb_substr($firstLine, 0, 255);
+        $overflow = mb_substr($firstLine, 255);
+        $rest = $parts[1] ?? '';
+
+        $body = $this->normalizeQuickCaptureText($overflow.($rest === '' ? '' : "\n".$rest));
+
+        return [$title, $body];
+    }
+
+    private function quickCaptureHtml(string $body): string
+    {
+        if ($body === '') {
+            return '';
+        }
+
+        $paragraphs = array_map(
+            fn (string $line): string => '<p>'.e($line).'</p>',
+            explode("\n", $body)
+        );
+
+        return implode('', $paragraphs);
+    }
+
     public function deleteNote(): void
     {
         if (! $this->selectedNoteId) {
@@ -287,6 +394,9 @@ new class extends Component
         $this->title = '';
         $this->content = '';
         $this->noteFolderId = null;
+        $this->showQuickCaptureModal = false;
+        $this->quickCaptureText = '';
+        $this->resetValidation('quickCaptureText');
     }
 
     public function showNotes(): void
@@ -417,7 +527,51 @@ new class extends Component
 };
 ?>
 
-<div class="p-6">
+<div class="p-6"
+    x-data="{
+        quickCaptureSaving: false,
+        quickCaptureCanSave: false,
+        openQuickCapture() {
+            this.quickCaptureCanSave = false;
+            this.$wire.openQuickCapture();
+        },
+        submitQuickCapture() {
+            if (this.quickCaptureSaving || ! this.quickCaptureCanSave) {
+                return;
+            }
+
+            this.quickCaptureSaving = true;
+
+            this.$wire.saveQuickCapture().finally(() => {
+                this.quickCaptureSaving = false;
+            });
+        },
+        handleQuickCaptureKey(event) {
+            if (event.key.toLowerCase() !== 'n' || event.repeat || event.isComposing) {
+                return;
+            }
+
+            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+                return;
+            }
+
+            if (! (event.target instanceof Element)) {
+                return;
+            }
+
+            if (event.target.closest('input, textarea, select, [contenteditable]')) {
+                return;
+            }
+
+            if (document.querySelector('dialog[open], [popover]:popover-open')) {
+                return;
+            }
+
+            this.openQuickCapture();
+        }
+    }"
+    x-on:keydown.window="handleQuickCaptureKey($event)"
+>
     {{-- The only way to do great work is to love what you do. - Steve Jobs --}}
     <div class="grid grid-cols-1 gap-6 md:grid-cols-4">
 
@@ -481,10 +635,19 @@ new class extends Component
                 </h1>
 
                 @if (!$isTrashView)
-                    <button type="button" wire:click="createNote"
-                        class="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
-                        New Note
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <flux:tooltip content="{{ __('Quick capture') }}" kbd="N" class="hidden md:inline-flex">
+                            <button type="button" x-on:click="openQuickCapture()"
+                                class="rounded-lg border px-4 py-2 text-sm font-medium">
+                                {{ __('Quick capture') }}
+                            </button>
+                        </flux:tooltip>
+
+                        <button type="button" wire:click="createNote"
+                            class="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">
+                            New Note
+                        </button>
+                    </div>
                 @endif
             </div>
 
@@ -514,7 +677,7 @@ new class extends Component
                             </h2>
 
                             <p class="mt-1 text-sm text-zinc-500">
-                                {{ \Illuminate\Support\Str::limit(strip_tags($note->content ?? ''), 120) }}
+                                {{ \Illuminate\Support\Str::limit(html_entity_decode(strip_tags($note->content ?? '')), 120) }}
                             </p>
 
                             @if ($isTrashView)
@@ -812,6 +975,14 @@ new class extends Component
 
     </div>
 
+    @if (!$isTrashView)
+        <button type="button" x-on:click="openQuickCapture()"
+            class="fixed bottom-[calc(1.5rem_+_env(safe-area-inset-bottom))] right-[calc(1.5rem_+_env(safe-area-inset-right))] z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-lg md:hidden"
+            aria-label="{{ __('Quick capture') }}">
+            <flux:icon.plus class="size-6" />
+        </button>
+    @endif
+
     <flux:modal name="manage-folder" wire:model="showFolderModal" class="min-w-0 w-full max-w-md">
         <form wire:submit="saveFolder" class="space-y-6">
             <div>
@@ -838,6 +1009,55 @@ new class extends Component
                 <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="saveFolder">
                     {{ $editingFolderId === null ? __('Create folder') : __('Save changes') }}
                 </flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <flux:modal name="quick-capture" wire:model="showQuickCaptureModal" wire:close="closeQuickCapture"
+        class="min-w-0 w-full max-w-md">
+        <form x-on:submit.prevent="submitQuickCapture()" class="space-y-6">
+            <div>
+                <flux:heading size="lg">
+                    {{ __('Capture a thought') }}
+                </flux:heading>
+                <flux:subheading>
+                    {{ __('The first line becomes the title.') }}
+                </flux:subheading>
+            </div>
+
+            <flux:field>
+                <flux:label for="quick-capture-text">{{ __('Note') }}</flux:label>
+                <flux:textarea id="quick-capture-text" wire:model="quickCaptureText"
+                    x-on:input="quickCaptureCanSave = $event.target.value.trim() !== ''"
+                    x-on:keydown.ctrl.enter.prevent="submitQuickCapture()"
+                    x-on:keydown.meta.enter.prevent="submitQuickCapture()" autofocus rows="5"
+                    placeholder="{{ __('What is on your mind?') }}" />
+                <p x-show="!quickCaptureCanSave" class="text-sm text-zinc-500">
+                    {{ __('Write something to capture.') }}
+                </p>
+                <flux:error name="quickCaptureText" />
+            </flux:field>
+
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <p class="text-xs text-zinc-500">
+                    <kbd class="rounded border px-1">Ctrl</kbd>/<kbd class="rounded border px-1">Cmd</kbd> +
+                    <kbd class="rounded border px-1">Enter</kbd> {{ __('to save') }}
+                    <span class="mx-2">·</span>
+                    <kbd class="rounded border px-1">N</kbd> {{ __('to open') }}
+                </p>
+
+                <div class="flex gap-2">
+                    <flux:modal.close>
+                        <flux:button type="button" variant="ghost" x-on:click="$wire.closeQuickCapture()">
+                            {{ __('Cancel') }}
+                        </flux:button>
+                    </flux:modal.close>
+
+                    <flux:button type="submit" variant="primary"
+                        x-bind:disabled="quickCaptureSaving || !quickCaptureCanSave">
+                        {{ __('Save') }}
+                    </flux:button>
+                </div>
             </div>
         </form>
     </flux:modal>

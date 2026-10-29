@@ -9,6 +9,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 - **Google OAuth (Socialite v5.31.0):** registration and login pages offer Google OAuth; `/auth/google/redirect` + `/callback` matches by `google_id`, falls back to email, links + verifies. Canceled or incomplete callbacks return to the originating login or registration page. Covered by `tests/Feature/Auth/GoogleControllerTest.php`. `google_id` is `#[Fillable]` (mass-assignable) and `#[Hidden]`.
 - **Default folders:** `UserObserver::created` seeds Work/School/Personal/Projects; registered once via `User::observe()` in `AppServiceProvider::boot()`. Folder names now use a per user unique normalized key.
 - **Notes (`Route::livewire('/notes', 'notes.index')`):** create/select/edit, folder filter + Trash, soft-delete/restore/force-delete, debounced live search (correctly parenthesized `LIKE` group), 4 sort orders, Tiptap rich-text editor. Covered by `tests/Feature/NotesTest.php`.
+- **Quick capture (2026-10-29):** the header trigger (tooltip with `N`) and the mobile floating button open a Flux modal; the first line becomes the title (255 code point cap, overflow moves into the body), later lines become escaped `<p>` lines, CRLF and outer Unicode whitespace are normalized, and an empty capture stays open with inline feedback. Saves through the signed in user with `folder_id` null, resets the view to All Notes/Newest/empty search without disturbing the selected note or unsaved editor content, and reports a success or danger toast. The `N` listener guards fields, contenteditable regions, modifiers, key repeat, IME composition, open dialogs/popovers, and Trash. List previews now decode entities once before `strip_tags`, so escaped HTML reads as typed. Covered by 15 tests in `tests/Feature/QuickCaptureTest.php`; the keyboard, responsive, disabled control, and double submit checks remain for `/check verify`. Requires a frontend rebuild on the dev machine for the new Tailwind classes.
 - **Save-button fix (2026-10-11):** the Save button called `getContent()` outside its Alpine `x-data` scope (`ReferenceError`, see `storage/logs/browser.log`). Fixed with the `save-note-requested` window-event pattern; no layout or server change.
 - **Attachments:** validated upload (10 MB, explicit mimes) storing to `local` disk under `note-attachments/{userId}` + `NoteAttachment` row; selected-note list, owner-checked download, and delete UI. Canceling the native file picker clears any queued temporary upload, and inline upload validation errors fade after five seconds. Covered by `tests/Feature/NotesTest.php`.
 - **Frontend built:** `public/build/manifest.json` exists; Vite 8.3.0, Tailwind 4.3.3, Tiptap 3.31.3.
@@ -24,6 +25,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 3. **`notes.version` column** exists (`default 1`) but is never read or incremented.
 4. ~~**Test gaps**~~ — **CLOSED 2026-10-12.** `NotesTest.php` now covers trash/restore/force-delete (+ cross-user restore isolation), folder filter, title+content search, and title A–Z sort; `RegistrationTest.php` asserts the 4 seeded folders via the real registration path.
 5. **Folder management:** create, rename, and delete actions and normalized per user name uniqueness are built and covered by tests. The migration passes in the test database but has not been applied to the persistent app database. The Alpha browser check remains open.
+6. **Quick capture manual checks:** automated coverage is green; the browser keyboard (N outside fields, inside fields and the editor, modifiers, repeat, IME), responsive trigger swap, disabled control, and double submit checks remain for `/check verify`. The new Tailwind classes need `npm run build` on the dev machine.
 
 ## Known Issues (ordered by severity)
 
@@ -37,7 +39,7 @@ Audited 2026-10-11 by direct repository inspection (lock files, migrations, mode
 
 ## Test Status
 
-- **Full suite: 89 passed / 276 assertions** (2026-10-25, PHP 8.3.6, in-memory SQLite). Includes folder management, email verification enforcement, and the Notes default destination tests.
+- **Full suite: 104 passed / 360 assertions** (2026-10-29, PHP 8.3.33, in-memory SQLite). Includes folder management, email verification enforcement, the Notes default destination tests, and quick capture.
 - ~~`NotesTest.php` + `RegistrationTest.php`: 24 passed / 54 assertions (2026-10-12 file run)~~ — folded into the full-suite total above.
 - CI (`.github/workflows/tests.yml`): PHP 8.3 + Node 22, `composer setup` then `composer ci:check` (config:clear + pint + phpstan + tests).
 - Browser check remains pending because the local `/notes` route requires a signed in account.
