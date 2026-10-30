@@ -203,7 +203,7 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - `app/Observers/UserObserver.php` — seeds Work/School/Personal/Projects on user `created`. Registered **once** via `User::observe()` in `AppServiceProvider::boot()`; never add `#[ObservedBy]` (double registration = duplicate folders).
 - `app/Http/Controllers/Auth/GoogleController.php` — matches by `google_id`, falls back to email, links + verifies.
 - `app/Http/Controllers/NoteAttachmentController.php` — owner-checked download (403/404).
-- `resources/views/components/notes/⚡index.blade.php` — the notes UI (folders, search/sort, Tiptap editor, attachments form). `resources/js/tiptap.js` + 4-line `app.js` expose `window.createTiptapComponent`.
+- `resources/views/components/notes/⚡index.blade.php` — the notes UI (folders, search/sort, Tiptap editor, quick capture modal, attachments form). `resources/js/tiptap.js` + 4-line `app.js` expose `window.createTiptapComponent`.
 - `database/migrations/` — users + `google_id`, folders (`unique(user_id,name)`, cascade on user delete), notes (`nullOnDelete` folder, cascade on user delete, cascade note→attachments via attachments migration).
 
 ## Conventions (follow what's here)
@@ -240,7 +240,8 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - Editor DOM is owned by Tiptap: the editor container keeps `wire:ignore` + `wire:key="tiptap-editor-{id}"`. Never put morph-dependent directives (`@error`, `wire:loading`, conditionals) inside it.
 - Editor content reaches PHP **only** via the `save-note-requested` window event → `$wire.saveNote(getContent())`. `$content` is seed-on-render, not live-synced.
 - Rebuild assets after JS changes (`npm run dev` for HMR, `npm run build` before serve-only runs). `window.createTiptapComponent` must exist or the editor silently never initializes (past Save-button failure mode — check `storage/logs/browser.log` first for Alpine errors).
-- Note content is stored as raw HTML: render only via `strip_tags(...)` (list) or `@js(...)` (editor seed). Never `{!! $note->content !!}`. Sole `{!! !!}` in views is Fortify's server-generated QR SVG.
+- Note content is stored as raw HTML: the list preview uses `html_entity_decode(strip_tags(...))` (Blade escapes the result), and the editor seed uses `@js(...)`. Never `{!! $note->content !!}`. Sole `{!! !!}` in views is Fortify's server-generated QR SVG.
+- Quick capture stores plain text as escaped `<p>` paragraphs; trim leading and trailing Unicode whitespace, including the byte order mark, before splitting the title and body.
 
 ## Working Rules
 

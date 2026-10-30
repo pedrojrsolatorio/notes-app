@@ -19,7 +19,50 @@ test('[AC-1] opens quick capture with an empty field', function () {
         ->assertSee('Write something to capture.');
 });
 
-test('[AC-2] captures the first line as the title and the rest as the body', function () {
+test('[AC-1] provides an accessible name and a labeled text box', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('openQuickCapture')
+        ->assertSeeHtml('aria-label="Quick capture"')
+        ->assertSeeHtml('for="quick-capture-text"')
+        ->assertSeeHtml('id="quick-capture-text"');
+});
+
+test('[AC-10] renders the shortcut hints', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->assertSee('Quick capture')
+        ->assertSee('Ctrl')
+        ->assertSee('Cmd')
+        ->assertSee('Enter')
+        ->assertSee('to save')
+        ->assertSee('to open');
+});
+
+test('[AC-9] closing without saving discards the draft and validation', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('openQuickCapture')
+        ->set('quickCaptureText', '   ')
+        ->call('saveQuickCapture')
+        ->assertHasErrors('quickCaptureText')
+        ->set('quickCaptureText', 'Draft to discard')
+        ->call('closeQuickCapture')
+        ->assertSet('showQuickCaptureModal', false)
+        ->assertSet('quickCaptureText', '')
+        ->assertHasNoErrors();
+});
+
+test('[AC-2] [AC-3] captures the first line as the title and the rest as the body', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
@@ -51,7 +94,7 @@ test('[AC-2] captures the first line as the title and the rest as the body', fun
         ->assertDontSee('Buy milk');
 });
 
-test('[AC-2] captures a title only note with an empty body', function () {
+test('[AC-3] captures a title only note with an empty body', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
@@ -68,7 +111,7 @@ test('[AC-2] captures a title only note with an empty body', function () {
     ]);
 });
 
-test('[AC-2] captured notes are searchable by title and body', function () {
+test('[AC-12] captured notes are searchable by title and body', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
@@ -133,7 +176,24 @@ test('[AC-3] normalizes CRLF and trims leading and trailing blank lines', functi
     ]);
 });
 
-test('[AC-4] stores escaped HTML instead of markup', function () {
+test('[AC-3] stores an interior blank line as an empty paragraph', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->set('quickCaptureText', "Title\nfirst\n\nlast")
+        ->call('saveQuickCapture')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseHas('notes', [
+        'user_id' => $user->id,
+        'title' => 'Title',
+        'content' => '<p>first</p><p></p><p>last</p>',
+    ]);
+});
+
+test('[AC-11] stores escaped HTML instead of markup', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
@@ -150,7 +210,7 @@ test('[AC-4] stores escaped HTML instead of markup', function () {
     ]);
 });
 
-test('[AC-6] strips escaped HTML from the list preview', function () {
+test('[AC-11] strips escaped HTML from the list preview', function () {
     $user = User::factory()->create();
     $user->notes()->create([
         'title' => 'Preview',
@@ -183,12 +243,12 @@ test('[AC-7] rejects ordinary whitespace and keeps the modal open', function () 
     $this->assertDatabaseCount('notes', 0);
 });
 
-test('[AC-9] rejects Unicode whitespace and keeps the modal open', function () {
+test('[AC-7] rejects Unicode whitespace and keeps the modal open', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
 
-    foreach (["\u{00A0}", "\u{2003}", "\u{3000}"] as $whitespace) {
+    foreach (["\u{00A0}", "\u{2003}", "\u{3000}", "\u{FEFF}"] as $whitespace) {
         Livewire::test('notes.index')
             ->call('openQuickCapture')
             ->set('quickCaptureText', $whitespace)
@@ -228,13 +288,17 @@ test('[AC-8] resets the view to unfiled notes, newest first, after a capture', f
         ->assertSee('Fresh');
 });
 
-test('[AC-8] refuses to open or save quick capture from Trash', function () {
+test('[AC-6] refuses to open or save quick capture from Trash', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);
 
     Livewire::test('notes.index')
+        ->call('openQuickCapture')
+        ->set('quickCaptureText', 'Draft in progress')
         ->call('showTrash')
+        ->assertSet('showQuickCaptureModal', false)
+        ->assertSet('quickCaptureText', '')
         ->call('openQuickCapture')
         ->assertSet('showQuickCaptureModal', false)
         ->set('quickCaptureText', 'Should not save')
@@ -245,7 +309,7 @@ test('[AC-8] refuses to open or save quick capture from Trash', function () {
     $this->assertDatabaseCount('notes', 0);
 });
 
-test('[AC-11] reports a danger toast and keeps the text when saving fails', function () {
+test('[AC-9] reports a danger toast and keeps the text when saving fails', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user);

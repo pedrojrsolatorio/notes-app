@@ -311,7 +311,7 @@ new class extends Component
     private function normalizeQuickCaptureText(string $text): string
     {
         $normalized = preg_replace(
-            '/\A[\p{Z}\x{0009}-\x{000D}\x{0085}]+|[\p{Z}\x{0009}-\x{000D}\x{0085}]+\z/u',
+            '/\A[\p{Z}\x{0009}-\x{000D}\x{0085}\x{FEFF}]+|[\p{Z}\x{0009}-\x{000D}\x{0085}\x{FEFF}]+\z/u',
             '',
             str_replace(["\r\n", "\r"], "\n", $text)
         );

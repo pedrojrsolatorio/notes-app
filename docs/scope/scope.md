@@ -47,8 +47,8 @@ Code in `app/Models/NoteAttachment.php`, `app/Http/Controllers/NoteAttachmentCon
 Create, rename, and delete flat folders from the notes screen, while keeping notes safe and folder names unique within your account.
 **Done when:** you can manage your folders with clear validation, and deleting a folder leaves its notes available in All Notes.
 - [x] Design it (spec): `/architect more flexible organization`
-- [ ] Build it: `/develop more flexible organization`
-  - [ ] Add the normalized name key and collision safe migration (AC-3, AC-7)
+- [x] Build it: `/develop more flexible organization`
+  - [x] Add the normalized name key and collision safe migration (AC-3, AC-7)
   - [x] Create folders with validation and selection behavior (AC-1, AC-3, AC-5, AC-6, AC-8)
   - [x] Rename folders and preserve selection and ordering (AC-2, AC-3, AC-5, AC-6, AC-8)
   - [x] Delete folders without losing notes or attachments (AC-4, AC-5, AC-8)
