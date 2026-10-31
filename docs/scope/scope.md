@@ -17,7 +17,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 4 | File attachments | Existing | existing |
 | 5 | More flexible organization | Slice 1 | in-progress |
 | 6 | Quick capture | Slice 2 | in-progress |
-| 7 | Note import and export | Slice 3 | planned |
+| 7 | Note import and export | Slice 3 | in-progress |
 | 8 | Offline use and device sync | Slice 4 | planned |
 | 9 | Note reminders | Slice 5 | planned |
 | 10 | Accessibility and responsive use | Slice 6 | planned |
@@ -68,10 +68,19 @@ Make it faster to save a thought without first going through the full note editi
 spec [0002](../specs/0002-quick-capture/index.md)
 Code in `resources/views/components/notes/⚡index.blade.php` and `tests/Feature/QuickCaptureTest.php`.
 
-### 7. Note import and export · planned · Beta · needs a decision
+### 7. Note import and export · in-progress · Beta
 Let you keep a usable copy of your notes outside the app and restore notes when needed.
 **Done when:** you can export and restore notes with their formatting and attachments, and an invalid or repeated import does not silently replace existing notes.
-- [ ] Design it (spec): `/architect note import and export`
+- [x] Design it (spec): `/architect note import and export`
+- [ ] Build it: `/develop note import and export`
+  - [ ] Add the portable identifier columns and mapping for folders, notes, and attachments (AC-1, AC-4, AC-6, AC-7)
+  - [ ] Add the export archive, password confirmation, and staged preview storage flow (AC-1, AC-2, AC-5, AC-11, AC-14)
+  - [ ] Add preview validation, rate limiting, and expiry handling (AC-3, AC-5, AC-10)
+  - [ ] Add import validation, additive restore logic, and skip summaries (AC-3, AC-4, AC-6, AC-7, AC-12, AC-13)
+  - [ ] Add the sanitization and attachment validation layer and final settings UI wiring (AC-8, AC-9, AC-1, AC-5, AC-10, AC-12)
+- [ ] Verify it: `/check verify note import and export`
+- [ ] Test it: `/test note import and export`
+spec [0003](../specs/0003-note-import-export.md)
 
 ### 8. Offline use and device sync · planned · Beta · needs a decision
 Let you use notes across devices and keep working when a connection is unavailable.
