@@ -1,7 +1,7 @@
 # 0003. Note import and export
 
 **Date**: 2026-10-30
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 

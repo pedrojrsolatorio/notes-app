@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Concerns\HasPortableId;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/** @property string $portable_id */
 class NoteAttachment extends Model
 {
+    use HasPortableId;
+
     protected $fillable = [
         'note_id',
         'user_id',
@@ -14,6 +18,7 @@ class NoteAttachment extends Model
         'file_path',
         'mime_type',
         'file_size',
+        'portable_id',
     ];
 
     /** @return BelongsTo<Note, $this> */

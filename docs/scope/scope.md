@@ -72,15 +72,16 @@ Code in `resources/views/components/notes/⚡index.blade.php` and `tests/Feature
 Let you keep a usable copy of your notes outside the app and restore notes when needed.
 **Done when:** you can export and restore notes with their formatting and attachments, and an invalid or repeated import does not silently replace existing notes.
 - [x] Design it (spec): `/architect note import and export`
-- [ ] Build it: `/develop note import and export`
-  - [ ] Add UUID backfill and the version 1 portable manifest mapping (AC-1, AC-4, AC-6, AC-7)
-  - [ ] Add encrypted export with attachment checks, sanitization, and archive limits (AC-1, AC-2, AC-8, AC-11, AC-14)
-  - [ ] Add strict preview validation, shared rate limits, staging, and expiry (AC-3, AC-5, AC-10, AC-11, AC-12)
-  - [ ] Add atomic additive restore, folder reuse, file validation, and skip reporting (AC-3, AC-4, AC-6, AC-7, AC-9, AC-12, AC-13)
-  - [ ] Add the profile settings workflow and completion states (AC-1, AC-2, AC-5, AC-10, AC-12, AC-13)
+- [x] Build it: `/develop note import and export`
+  - [x] Add UUID backfill and the version 1 portable manifest mapping (AC-1, AC-4, AC-6, AC-7)
+  - [x] Add encrypted export with attachment checks, sanitization, and archive limits (AC-1, AC-2, AC-8, AC-11, AC-14)
+  - [x] Add strict preview validation, shared rate limits, staging, and expiry (AC-3, AC-5, AC-10, AC-11, AC-12)
+  - [x] Add atomic additive restore, folder reuse, file validation, and skip reporting (AC-3, AC-4, AC-6, AC-7, AC-9, AC-12, AC-13)
+  - [x] Add the profile settings workflow and completion states (AC-1, AC-2, AC-5, AC-10, AC-12, AC-13)
 - [ ] Verify it: `/check verify note import and export`
-- [ ] Test it: `/test note import and export`
+- [x] Test it: `/test note import and export`
 spec [0003](../specs/0003-note-import-export.md)
+Code in `app/Services/NoteBackups/`, `app/Http/Controllers/NoteBackupController.php`, `resources/views/pages/settings/⚡import-export.blade.php`, `database/migrations/2026_11_01_150859_add_portable_ids_to_note_backup_records.php`, and `tests/Feature/NoteBackupTest.php`.
 
 ### 8. Offline use and device sync · planned · Beta · needs a decision
 Let you use notes across devices and keep working when a connection is unavailable.

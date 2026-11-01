@@ -189,6 +189,8 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - Tests: in-memory SQLite (`phpunit.xml`), `RefreshDatabase` for `tests/Feature` (`tests/Pest.php`). No test cleanup needed.
 - Full suite status: **37 passed / 94 assertions** (verified 2026-10-11). PHPStan level 7 configured (`phpstan.neon`, paths: app, bootstrap/app.php, config, database, routes) — **could not be verified in sandbox (timed out); run `composer types:check` on the dev machine.**
 
+**Build approach:** Tracer Bullet (each new feature works through the full app before the next one starts).
+
 ## Run & Verify
 
 - First time: `composer setup`. Daily loop: `composer run dev` (concurrently: `serve` + `queue:listen` + `pail` + `npm run dev`) → http://localhost:8000. See `README.md` "Running the App".
@@ -250,3 +252,7 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - No destructive commands, DB resets, data-touching migrations, or dependency upgrades without explaining risk + explicit confirmation.
 - Never claim success without running the relevant checks (Pest file(s) + Pint on touched PHP). Fix regressions you cause.
 - `docs/PROJECT_STATUS.md` is the audited state of the repo — update it when behavior changes (features completed, issues fixed/found).
+
+## Context files
+
+- [app/Services/NoteBackups/AGENTS.md](app/Services/NoteBackups/AGENTS.md): Backup archive, import validation, sanitization, staging, and restore rules.

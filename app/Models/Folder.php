@@ -2,13 +2,17 @@
 
 namespace App\Models;
 
+use App\Concerns\HasPortableId;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/** @property string $portable_id */
 class Folder extends Model
 {
-    protected $fillable = ['name'];
+    use HasPortableId;
+
+    protected $fillable = ['name', 'portable_id'];
 
     public static function normalizeName(string $name): string
     {

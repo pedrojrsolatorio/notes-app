@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\NoteBackupController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth'])->group(function () {
@@ -10,6 +11,18 @@ Route::middleware(['auth'])->group(function () {
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('settings/appearance', 'pages::settings.appearance')->name('appearance.edit');
+
+    Route::livewire('settings/import-export', 'pages::settings.import-export')
+        ->name('import-export.edit');
+
+    Route::post('settings/import-export/export', [NoteBackupController::class, 'export'])
+        ->name('import-export.export');
+    Route::post('settings/import-export/preview', [NoteBackupController::class, 'preview'])
+        ->name('import-export.preview');
+    Route::post('settings/import-export/import', [NoteBackupController::class, 'import'])
+        ->name('import-export.import');
+    Route::post('settings/import-export/cancel', [NoteBackupController::class, 'cancel'])
+        ->name('import-export.cancel');
 
     Route::livewire('settings/security', 'pages::settings.security')
         ->middleware([

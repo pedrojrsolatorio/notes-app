@@ -404,12 +404,7 @@ new class extends Component
         $this->isTrashView = false;
     }
 
-    protected function attachmentValidationRules(): array
-    {
-        return [
-            'attachment' => ['required', 'file', 'max:10240', 'mimes:pdf,doc,docx,txt,rtf,odt,xls,xlsx,ppt,pptx,csv,jpg,jpeg,png'],
-        ];
-    }
+    use \App\Concerns\AttachmentValidationRules;
 
     public function uploadAttachment(): void
     {

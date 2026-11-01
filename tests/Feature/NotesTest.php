@@ -7,6 +7,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 
 /**
@@ -335,6 +336,7 @@ test('[AC-3] shows a database uniqueness conflict inline when a duplicate is ins
 
         DB::table('folders')->insert([
             'user_id' => $user->id,
+            'portable_id' => Str::uuid(),
             'name' => 'Reading',
             'name_key' => 'reading',
             'created_at' => now(),
@@ -505,6 +507,7 @@ test('[AC-7] backfills folder name keys without changing existing display names'
 
     $folderId = DB::table('folders')->insertGetId([
         'user_id' => $user->id,
+        'portable_id' => Str::uuid(),
         'name' => "  Café\u{00A0}",
         'created_at' => now(),
         'updated_at' => now(),
@@ -527,12 +530,14 @@ test('[AC-7] stops the folder name migration before schema changes when existing
 
     $firstFolderId = DB::table('folders')->insertGetId([
         'user_id' => $user->id,
+        'portable_id' => Str::uuid(),
         'name' => 'Travel',
         'created_at' => now(),
         'updated_at' => now(),
     ]);
     $secondFolderId = DB::table('folders')->insertGetId([
         'user_id' => $user->id,
+        'portable_id' => Str::uuid(),
         'name' => ' travel ',
         'created_at' => now(),
         'updated_at' => now(),
