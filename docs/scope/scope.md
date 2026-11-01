@@ -73,11 +73,11 @@ Let you keep a usable copy of your notes outside the app and restore notes when 
 **Done when:** you can export and restore notes with their formatting and attachments, and an invalid or repeated import does not silently replace existing notes.
 - [x] Design it (spec): `/architect note import and export`
 - [ ] Build it: `/develop note import and export`
-  - [ ] Add the portable identifier columns and mapping for folders, notes, and attachments (AC-1, AC-4, AC-6, AC-7)
-  - [ ] Add the export archive, password confirmation, and staged preview storage flow (AC-1, AC-2, AC-5, AC-11, AC-14)
-  - [ ] Add preview validation, rate limiting, and expiry handling (AC-3, AC-5, AC-10)
-  - [ ] Add import validation, additive restore logic, and skip summaries (AC-3, AC-4, AC-6, AC-7, AC-12, AC-13)
-  - [ ] Add the sanitization and attachment validation layer and final settings UI wiring (AC-8, AC-9, AC-1, AC-5, AC-10, AC-12)
+  - [ ] Add UUID backfill and the version 1 portable manifest mapping (AC-1, AC-4, AC-6, AC-7)
+  - [ ] Add encrypted export with attachment checks, sanitization, and archive limits (AC-1, AC-2, AC-8, AC-11, AC-14)
+  - [ ] Add strict preview validation, shared rate limits, staging, and expiry (AC-3, AC-5, AC-10, AC-11, AC-12)
+  - [ ] Add atomic additive restore, folder reuse, file validation, and skip reporting (AC-3, AC-4, AC-6, AC-7, AC-9, AC-12, AC-13)
+  - [ ] Add the profile settings workflow and completion states (AC-1, AC-2, AC-5, AC-10, AC-12, AC-13)
 - [ ] Verify it: `/check verify note import and export`
 - [ ] Test it: `/test note import and export`
 spec [0003](../specs/0003-note-import-export.md)
