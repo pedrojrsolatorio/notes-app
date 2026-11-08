@@ -18,7 +18,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 5 | More flexible organization | Slice 1 | in-progress |
 | 6 | Quick capture | Slice 2 | in-progress |
 | 7 | Note import and export | Slice 3 | in-progress |
-| 8 | Offline use and device sync | Slice 4 | planned |
+| 8 | Offline use and device sync | Slice 4 | in-progress |
 | 9 | Note reminders | Slice 5 | planned |
 | 10 | Accessibility and responsive use | Slice 6 | planned |
 | 11 | Performance as notes grow | Slice 7 | planned |
@@ -83,10 +83,18 @@ Let you keep a usable copy of your notes outside the app and restore notes when 
 spec [0003](../specs/0003-note-import-export.md)
 Code in `app/Services/NoteBackups/`, `app/Http/Controllers/NoteBackupController.php`, `resources/views/pages/settings/⚡import-export.blade.php`, `database/migrations/2026_11_01_150859_add_portable_ids_to_note_backup_records.php`, and `tests/Feature/NoteBackupTest.php`.
 
-### 8. Offline use and device sync · planned · Beta · needs a decision
+### 8. Offline use and device sync · in-progress · Beta
 Let you use notes across devices and keep working when a connection is unavailable.
 **Done when:** your changes remain private to you, offline edits are kept, and changes from multiple devices do not silently lose note content.
-- [ ] Design it (spec): `/architect offline use and device sync`
+- [x] Design it (spec): `/architect offline use and device sync`
+- [ ] Build it: `/develop offline use and device sync`
+  - [ ] Add the sync change log, folder versions, and the sync API
+  - [ ] Add the installed app shell with the local store and offline editing
+  - [ ] Add folder sync, conflict copies, and session handling
+- [ ] Verify it: `/check verify offline use and device sync`
+- [ ] Test it: `/test offline use and device sync`
+spec [0004](../specs/0004-offline-use-and-device-sync/index.md)
+Code in `app/Sync/`, `app/Http/Controllers/SyncController.php`, `resources/views/pwa/notes.blade.php`, `resources/js/offline-app.js`, and `database/migrations/`.
 
 ### 9. Note reminders · planned · needs a decision
 Help you return to a note at a time you choose.
