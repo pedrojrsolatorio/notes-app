@@ -985,6 +985,10 @@ class NoteBackupService
 
     private function validateAttachmentFile(string $path, string $displayName): void
     {
+        if (! $this->hasAllowedAttachmentExtension($displayName)) {
+            throw $this->invalidItem('attachment', $displayName, 'The attachment does not pass the app upload policy.', 'invalid_attachment', 400);
+        }
+
         $validator = Validator::make(
             ['attachment' => new File($path)],
             $this->attachmentValidationRules(),
@@ -993,6 +997,25 @@ class NoteBackupService
         if ($validator->fails()) {
             throw $this->invalidItem('attachment', $displayName, 'The attachment does not pass the app upload policy.', 'invalid_attachment', 400);
         }
+    }
+
+    private function hasAllowedAttachmentExtension(string $displayName): bool
+    {
+        $extension = strtolower(pathinfo($displayName, PATHINFO_EXTENSION));
+
+        if ($extension === '') {
+            return true;
+        }
+
+        foreach ($this->attachmentValidationRules()['attachment'] ?? [] as $rule) {
+            if (! str_starts_with($rule, 'mimes:')) {
+                continue;
+            }
+
+            return in_array($extension, explode(',', substr($rule, 6)), true);
+        }
+
+        return false;
     }
 
     private function invalidItem(

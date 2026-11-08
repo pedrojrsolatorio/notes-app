@@ -157,7 +157,7 @@ test('[AC-1, AC-2, AC-4, AC-6, AC-7, AC-8, AC-9, AC-13, AC-14] exports and resto
     expect($formatData['opslimit'])->toBe(3);
     expect($formatData['memlimit'])->toBe(67108864);
     expect($formatData['cipher'])->toBe('secretstream_xchacha20poly1305');
-    expect(base64_decode($formatData['salt'], true))->toHaveLength(SODIUM_CRYPTO_PWHASH_SALTBYTES);
+    expect(strlen((string) base64_decode($formatData['salt'], true)))->toBe(SODIUM_CRYPTO_PWHASH_SALTBYTES);
     expect($outerArchive->statName('payload.bin')['size'])->toBeGreaterThan(0);
     expect($payload)
         ->toBeString()
@@ -578,8 +578,9 @@ test('[AC-9] rejects an unsupported attachment before staging or writing importe
         ['Accept' => 'application/json'],
     )
         ->assertBadRequest()
-        ->assertJsonPath('code', 'invalid_attachment')
-        ->assertJsonPath('items.0.display_name', 'blocked.exe');
+        ->assertJsonPath('code', 'invalid_items')
+        ->assertJsonPath('items.0.display_name', 'blocked.exe')
+        ->assertJsonPath('items.0.reason_code', 'invalid_attachment');
 
     $this->assertDatabaseMissing('notes', ['portable_id' => $noteId]);
     $this->assertDatabaseMissing('note_attachments', ['portable_id' => $attachmentId]);
