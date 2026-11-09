@@ -1,0 +1,30 @@
+{
+    "name": "Notes",
+    "short_name": "Notes",
+    "description": "Your notes, on every device, online and offline.",
+    "start_url": "/app",
+    "scope": "/app",
+    "display": "standalone",
+    "background_color": "#0a0a0a",
+    "theme_color": "#09090b",
+    "icons": [
+        {
+            "src": "/favicon.svg",
+            "type": "image/svg+xml",
+            "sizes": "any",
+            "purpose": "any"
+        },
+        {
+            "src": "/apple-touch-icon.png",
+            "type": "image/png",
+            "sizes": "180x180",
+            "purpose": "any"
+        },
+        {
+            "src": "/favicon.ico",
+            "type": "image/x-icon",
+            "sizes": "64x64 32x32 16x16",
+            "purpose": "any"
+        }
+    ]
+}

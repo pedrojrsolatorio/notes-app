@@ -2,7 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\Folder;
+use App\Models\Note;
+use App\Models\NoteAttachment;
 use App\Models\User;
+use App\Observers\FolderObserver;
+use App\Observers\NoteAttachmentObserver;
+use App\Observers\NoteObserver;
 use App\Observers\UserObserver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
@@ -27,6 +33,9 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         User::observe(UserObserver::class);
+        Note::observe(NoteObserver::class);
+        Folder::observe(FolderObserver::class);
+        NoteAttachment::observe(NoteAttachmentObserver::class);
     }
 
     /**

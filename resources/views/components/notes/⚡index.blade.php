@@ -631,6 +631,11 @@ new class extends Component
 
                 @if (!$isTrashView)
                     <div class="flex items-center gap-2">
+                        <a href="{{ route('pwa.notes') }}"
+                            class="rounded-lg border px-4 py-2 text-sm font-medium">
+                            {{ __('Install app') }}
+                        </a>
+
                         <flux:tooltip content="{{ __('Quick capture') }}" kbd="N" class="hidden md:inline-flex">
                             <button type="button" x-on:click="openQuickCapture()"
                                 class="rounded-lg border px-4 py-2 text-sm font-medium">

@@ -14,6 +14,10 @@ class Folder extends Model
 
     protected $fillable = ['name', 'portable_id'];
 
+    protected $attributes = [
+        'version' => 1,
+    ];
+
     public static function normalizeName(string $name): string
     {
         $normalizedName = preg_replace(

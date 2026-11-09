@@ -87,12 +87,12 @@ Code in `app/Services/NoteBackups/`, `app/Http/Controllers/NoteBackupController.
 Let you use notes across devices and keep working when a connection is unavailable.
 **Done when:** your changes remain private to you, offline edits are kept, and changes from multiple devices do not silently lose note content.
 - [x] Design it (spec): `/architect offline use and device sync`
-- [ ] Build it: `/develop offline use and device sync`
-  - [ ] Add the sync change log, folder versions, and the sync API
-  - [ ] Add the installed app shell with the local store and offline editing
-  - [ ] Add folder sync, conflict copies, and session handling
+- [x] Build it: `/develop offline use and device sync`
+  - [x] Add the sync change log, folder versions, and the sync API
+  - [x] Add the installed app shell with the local store and offline editing
+  - [x] Add folder sync, conflict copies, and session handling
 - [ ] Verify it: `/check verify offline use and device sync`
-- [ ] Test it: `/test offline use and device sync`
+- [x] Test it: `/test offline use and device sync`
 spec [0004](../specs/0004-offline-use-and-device-sync/index.md)
 Code in `app/Sync/`, `app/Http/Controllers/SyncController.php`, `resources/views/pwa/notes.blade.php`, `resources/js/offline-app.js`, and `database/migrations/`.
 

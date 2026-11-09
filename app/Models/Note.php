@@ -21,6 +21,10 @@ class Note extends Model
         'portable_id',
     ];
 
+    protected $attributes = [
+        'version' => 1,
+    ];
+
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {
