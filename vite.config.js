@@ -3,8 +3,6 @@ import laravel from 'laravel-vite-plugin';
 import { bunny } from 'laravel-vite-plugin/fonts';
 import { defineConfig, lazyPlugins } from 'vite-plus';
 
-const fontsConfigEnabled = process.env.VITE_SKIP_FONTS !== '1';
-
 // VITE_SKIP_FONTS=1 skips the webfont fetch for offline or sandbox builds.
 const fontsConfigEnabled = process.env.VITE_SKIP_FONTS !== '1';
 

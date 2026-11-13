@@ -221,41 +221,41 @@ class SyncController extends Controller
      */
     private function applyOne(User $user, array $change): array
     {
-        return DB::transaction(function () use ($user, $change): array {
-            $existing = SyncChange::query()
-                ->where('user_id', $user->getKey())
-                ->where('client_change_id', $change['client_change_id'])
-                ->first();
+        try {
+            return DB::transaction(function () use ($user, $change): array {
+                $existing = SyncChange::query()
+                    ->where('user_id', $user->getKey())
+                    ->where('client_change_id', $change['client_change_id'])
+                    ->first();
 
-            if ($existing !== null && $existing->status !== null) {
-                return $this->replay($user, $existing);
-            }
+                if ($existing !== null && $existing->status !== null) {
+                    return $this->replay($user, $existing);
+                }
 
-            try {
                 if ($change['entity_type'] === 'note') {
                     return $this->applyNoteChange($user, $change);
                 }
 
                 return $this->applyFolderChange($user, $change);
-            } catch (\Throwable $exception) {
-                report($exception);
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
 
-                $record = SyncChange::record($user->getKey(), $change['entity_type'], $change['portable_id'], $change['action'], $change['client_change_id']);
-                $record->update([
-                    'status' => 'rejected',
-                    'error' => 'This change could not be applied.',
-                ]);
+            $record = SyncChange::record($user->getKey(), $change['entity_type'], $change['portable_id'], $change['action'], $change['client_change_id']);
+            $record->update([
+                'status' => 'rejected',
+                'error' => 'This change could not be applied.',
+            ]);
 
-                return [
-                    'client_change_id' => $change['client_change_id'],
-                    'status' => 'rejected',
-                    'note' => null,
-                    'folder' => null,
-                    'conflict_note' => null,
-                    'message' => 'This change could not be applied.',
-                ];
-            }
-        });
+            return [
+                'client_change_id' => $change['client_change_id'],
+                'status' => 'rejected',
+                'note' => null,
+                'folder' => null,
+                'conflict_note' => null,
+                'message' => 'This change could not be applied.',
+            ];
+        }
     }
 
     private function recordChange(User $user, string $entityType, string $portableId, string $action, ?string $clientChangeId = null): void
@@ -263,7 +263,6 @@ class SyncController extends Controller
         SyncChange::record($user->getKey(), $entityType, $portableId, $action, $clientChangeId)
             ->update(['status' => 'applied']);
     }
-
 
     private function applyNoteChange(User $user, array $change): array
     {
@@ -274,6 +273,10 @@ class SyncController extends Controller
 
         if (! in_array($action, self::NOTE_ACTIONS, true)) {
             return $this->reject($user, $change, "Unsupported note action: {$action}.");
+        }
+
+        if (! $this->notePayloadIsWellFormed($payload)) {
+            return $this->reject($user, $change, 'This note change is malformed.');
         }
 
         return ChangeRecorder::withoutRecording(function () use ($user, $change, $action, $portableId, $payload, $baseVersion): array {
@@ -298,6 +301,21 @@ class SyncController extends Controller
                 default => $this->reject($user, $change, 'This note change is not supported.'),
             };
         });
+    }
+
+    private function notePayloadIsWellFormed(array $payload): bool
+    {
+        foreach (['title', 'content', 'folder_portable_id'] as $key) {
+            if (! array_key_exists($key, $payload)) {
+                continue;
+            }
+
+            if ($payload[$key] !== null && ! is_string($payload[$key])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function createNote(User $user, array $change, ?Note $existing, array $payload): array
@@ -347,15 +365,20 @@ class SyncController extends Controller
             return $this->reject($user, $change, 'A note needs a title of up to 255 characters.');
         }
 
-        $folder = $this->resolveFolder($user, $payload['folder_portable_id'] ?? null, $folderError);
+        $folderProvided = array_key_exists('folder_portable_id', $payload);
+        $folder = $folderProvided
+            ? $this->resolveFolder($user, $payload['folder_portable_id'], $folderError)
+            : $note->folder;
 
-        if (($payload['folder_portable_id'] ?? null) !== null && $folder === null) {
+        if ($folderProvided && $payload['folder_portable_id'] !== null && $folder === null) {
             return $this->reject($user, $change, $folderError);
         }
 
         if ($note->trashed()) {
             if ($this->contentMatches($note, $payload)) {
-                $this->applyFolderMove($user, $note, $folder, $change['client_change_id']);
+                if ($folderProvided) {
+                    $this->applyFolderMove($user, $note, $folder, $change['client_change_id']);
+                }
 
                 return $this->applied($this->noteState($note->fresh(['folder', 'attachments'])), $change['client_change_id']);
             }
@@ -365,7 +388,9 @@ class SyncController extends Controller
 
         if ($baseVersion !== $note->version) {
             if ($this->contentMatches($note, $payload)) {
-                $this->applyFolderMove($user, $note, $folder, $change['client_change_id']);
+                if ($folderProvided) {
+                    $this->applyFolderMove($user, $note, $folder, $change['client_change_id']);
+                }
 
                 return $this->applied($this->noteState($note->fresh(['folder', 'attachments'])), $change['client_change_id']);
             }
@@ -376,7 +401,7 @@ class SyncController extends Controller
         $note->forceFill([
             'title' => $title,
             'content' => $payload['content'] ?? $note->content,
-            'folder_id' => $folder?->getKey(),
+            'folder_id' => $folderProvided ? $folder?->getKey() : $note->folder_id,
         ])->save();
         $this->bumpNoteVersion($note);
         $this->recordChange($user, 'note', $change['portable_id'], 'updated', $change['client_change_id']);
@@ -615,14 +640,7 @@ class SyncController extends Controller
     private function deleteFolder(User $user, array $change, ?Folder $folder): array
     {
         if ($folder === null) {
-            return [
-                'client_change_id' => $change['client_change_id'],
-                'status' => 'applied',
-                'note' => null,
-                'folder' => null,
-                'conflict_note' => null,
-                'message' => null,
-            ];
+            return $this->reject($user, $change, 'Folder not found.');
         }
 
         $affected = Note::withTrashed()

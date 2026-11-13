@@ -185,9 +185,9 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 ## Verified Stack
 
 - PHP >= 8.3 (CI: `shivammathur/setup-php` 8.3; dev machine: `/usr/bin/php8.3` via `opencode.json`; verified under PHP 8.3.33), Laravel framework v13.32.0, Livewire v4.4.5, Flux v2.20.0, Fortify v1.39.0, Socialite v5.31.0, Pest v4.7.8.
-- JS: Tiptap 3.31.3, Vite 8.3.0, Tailwind 4.3.3, Node 22 in CI. `public/build` manifest exists — frontend is built.
+- JS: Tiptap 3.31.3, Vite 8.3.0, Tailwind 4.3.3, Dexie 4.4.7, Node 22 in CI. `public/build` manifest exists, so the frontend is built.
 - Tests: in-memory SQLite (`phpunit.xml`), `RefreshDatabase` for `tests/Feature` (`tests/Pest.php`). No test cleanup needed.
-- Full suite status: **37 passed / 94 assertions** (verified 2026-10-11). PHPStan level 7 configured (`phpstan.neon`, paths: app, bootstrap/app.php, config, database, routes) — **could not be verified in sandbox (timed out); run `composer types:check` on the dev machine.**
+- Full suite status: not rerun after offline sync; `SyncApiTest` passed 34 tests / 165 assertions (verified 2026-11-13). PHPStan level 7 configured (`phpstan.neon`, paths: app, bootstrap/app.php, config, database, routes); **could not be verified in sandbox (timed out); run `composer types:check` on the dev machine.**
 
 **Build approach:** Tracer Bullet (each new feature works through the full app before the next one starts).
 
@@ -200,13 +200,16 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 
 ## Architecture Map
 
-- `routes/web.php` — home, dashboard, Google OAuth, `Route::livewire('/notes', 'notes.index')`, `note-attachments/{attachment}/download` (all behind `auth`+`verified`).
-- `app/Models/` — `User` (Fortify/2FA/passkey traits, `#[Fillable]` incl. `google_id`, `#[Hidden]` incl. secrets + `google_id`), `Folder`, `Note` (SoftDeletes, `version` column currently unused), `NoteAttachment`.
+- `routes/web.php`: home, Google OAuth, and the `/app` shell are public; dashboard, `Route::livewire('/notes', 'notes.index')`, `/sync` GET and POST, and `note-attachments/{attachment}/download` are behind `auth`+`verified`.
+- `app/Models/`: `User` (Fortify/2FA/passkey traits, `#[Fillable]` incl. `google_id`, `#[Hidden]` incl. secrets + `google_id`), `Folder` (`version`), `Note` (SoftDeletes, `version` used for sync), `NoteAttachment`, and `SyncChange` (the change log cursor).
 - `app/Observers/UserObserver.php` — seeds Work/School/Personal/Projects on user `created`. Registered **once** via `User::observe()` in `AppServiceProvider::boot()`; never add `#[ObservedBy]` (double registration = duplicate folders).
+- `app/Observers/NoteObserver.php`, `FolderObserver.php`, and `NoteAttachmentObserver.php`: write `sync_changes` rows for note, folder, and attachment mutations. `App\Sync\ChangeRecorder::withoutRecording()` suppresses recording while a client change is applied, so sync does not log duplicate rows.
 - `app/Http/Controllers/Auth/GoogleController.php` — matches by `google_id`, falls back to email, links + verifies.
 - `app/Http/Controllers/NoteAttachmentController.php` — owner-checked download (403/404).
+- `app/Http/Controllers/SyncController.php`: session and CSRF protected `/sync` read and write API. `since` 0 returns a full snapshot; other values page the `sync_changes` cursor. Each change returns its own result, and stale note content creates a conflict copy in All Notes.
 - `resources/views/components/notes/⚡index.blade.php` — the notes UI (folders, search/sort, Tiptap editor, quick capture modal, attachments form). `resources/js/tiptap.js` + 4-line `app.js` expose `window.createTiptapComponent`.
-- `database/migrations/` — users + `google_id`, folders (`unique(user_id,name)`, cascade on user delete), notes (`nullOnDelete` folder, cascade on user delete, cascade note→attachments via attachments migration).
+- `resources/views/pwa/notes.blade.php` and `resources/js/offline-app.js`: the public `/app` shell and the Dexie offline client. `public/sw.js` caches the `/app` shell and must never cache `/sync` or `/note-attachments/`.
+- `database/migrations/`: users + `google_id`, folders (`unique(user_id,name)`, `version`, cascade on user delete), notes (`nullOnDelete` folder, cascade on user delete, cascade note→attachments via attachments migration), note_attachments, and `sync_changes` (the sync cursor).
 
 ## Conventions (follow what's here)
 
@@ -226,6 +229,13 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - `#[Locked]` = server-only mutable; `#[Computed]` = read-only derived; plain `public` = client-mutable (validate it). Never store auth decisions in plain public props.
 - Google OAuth callback has no throttle — acceptable for now (Google-verified emails), note before exposing broadly.
 
+## Offline Sync (load-bearing)
+
+- Every note and folder mutation writes one `sync_changes` row in the same transaction. Apply client changes with `ChangeRecorder::withoutRecording()` so the sync apply does not write a second row.
+- `notes.version` and `folders.version` are the conflict bases. The client sends portable ids only, never server integer ids. A stale note content change creates a normal note titled `Conflict copy of <title>` in All Notes; a folder delete wins and moves its notes to All Notes.
+- The `/app` shell is public and probes the session. `/sync` stays behind `auth`+`verified` with session CSRF and is rate limited to 60 requests per minute. Every sync query is scoped to `auth()->user()`.
+- The Dexie database is per user (`notes-offline-{userId}`), and every local query filters by `user_id`. The service worker caches only the `/app` shell and never `/sync` or `/note-attachments/`. Attachments stay online only; sync sends a manifest without file bytes.
+
 ## Storage & Uploads
 
 - Disk `local` (`storage/app/private`), per-user subdirs (`note-attachments/{userId}`). Never move uploads to `public` without an owner-checked route.
@@ -234,12 +244,13 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 
 ## Migrations
 
-- Additive-only on existing tables. New tables in this project: folders, notes, `google_id` on users, note_attachments. Deletions cascade user→folders/notes and note→attachments; folder delete nulls `notes.folder_id`.
+- Additive-only on existing tables. New tables in this project: folders, notes, `google_id` on users, note_attachments, and `sync_changes`. `folders.version` is the sync conflict base. Deletions cascade user→folders/notes and note→attachments; folder delete nulls `notes.folder_id`.
 - `DB::prohibitDestructiveCommands(app()->isProduction())` is on — destructive ops fail in prod by design.
 
 ## Frontend / Tiptap Constraints
 
 - Editor DOM is owned by Tiptap: the editor container keeps `wire:ignore` + `wire:key="tiptap-editor-{id}"`. Never put morph-dependent directives (`@error`, `wire:loading`, conditionals) inside it.
+- The offline app imports `createTiptapEditor` from `resources/js/tiptap.js` directly and does not use Livewire directives.
 - Editor content reaches PHP **only** via the `save-note-requested` window event → `$wire.saveNote(getContent())`. `$content` is seed-on-render, not live-synced.
 - Rebuild assets after JS changes (`npm run dev` for HMR, `npm run build` before serve-only runs). `window.createTiptapComponent` must exist or the editor silently never initializes (past Save-button failure mode — check `storage/logs/browser.log` first for Alpine errors).
 - Note content is stored as raw HTML: the list preview uses `html_entity_decode(strip_tags(...))` (Blade escapes the result), and the editor seed uses `@js(...)`. Never `{!! $note->content !!}`. Sole `{!! !!}` in views is Fortify's server-generated QR SVG.

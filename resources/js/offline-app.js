@@ -18,6 +18,10 @@ function rememberUserId(userId) {
     }
 }
 
+function forgetUserId() {
+    localStorage.removeItem(LAST_USER_KEY);
+}
+
 function pageUserId() {
     const value = document.body?.dataset?.userId;
     return value ? Number(value) : null;
@@ -31,7 +35,7 @@ async function fetchPageUserId() {
         });
 
         if (!response.ok) {
-            return null;
+            return undefined;
         }
 
         const text = await response.text();
@@ -39,7 +43,7 @@ async function fetchPageUserId() {
 
         return match ? Number(match[1]) : null;
     } catch {
-        return null;
+        return undefined;
     }
 }
 
@@ -263,10 +267,17 @@ async function pull(db, userId) {
         }
 
         const pendingNotes = new Set();
-        const pendingFolders = new Set();
+        const pendingFolders = new Map();
 
         for (const row of await db.outbox.where("user_id").equals(userId).toArray()) {
-            (row.entity_type === "note" ? pendingNotes : pendingFolders).add(row.entity_portable_id);
+            if (row.entity_type === "note") {
+                pendingNotes.add(row.entity_portable_id);
+                continue;
+            }
+
+            const rows = pendingFolders.get(row.entity_portable_id) ?? [];
+            rows.push(row);
+            pendingFolders.set(row.entity_portable_id, rows);
         }
 
         await db.transaction("rw", [db.notes, db.folders, db.sync_meta, db.outbox], async () => {
@@ -292,23 +303,11 @@ async function pull(db, userId) {
             }
 
             for (const folder of data.folders ?? []) {
-                if (await hasPending(db, userId, "folder", folder.portable_id)) {
-                    await db.folders.put({
-                        portable_id: folder.portable_id,
-                        user_id: userId,
-                        name: folder.name,
-                        version: folder.version,
-                        updated_at: folder.updated_at,
-                        sync_state: "synced",
-                        last_synced_at: new Date().toISOString(),
-                    });
+                const pending = pendingFolders.get(folder.portable_id) ?? [];
+                const pendingRename = pending.find((row) => row.action === "updated");
 
-                    // A server rename wins over a pending local rename.
-                    await db.outbox.where("user_id").equals(userId)
-                        .filter((row) => row.entity_type === "folder" && row.entity_portable_id === folder.portable_id)
-                        .delete();
-
-                    notice(`The folder "${folder.name}" was renamed on another device.`);
+                if (pending.length > 0 && (!pendingRename || folder.version <= pendingRename.base_version)) {
+                    // A still-valid local folder change wins until it is pushed.
                     continue;
                 }
 
@@ -321,6 +320,15 @@ async function pull(db, userId) {
                     sync_state: "synced",
                     last_synced_at: new Date().toISOString(),
                 });
+
+                if (pendingRename) {
+                    // A stale rename loses: apply the server state.
+                    await db.outbox.where("user_id").equals(userId)
+                        .filter((row) => row.entity_type === "folder" && row.entity_portable_id === folder.portable_id)
+                        .delete();
+
+                    notice(`The folder "${folder.name}" was renamed on another device.`);
+                }
             }
 
             for (const portableId of data.deleted_note_portable_ids ?? []) {
@@ -421,7 +429,7 @@ async function push(db, userId) {
         throw error;
     }
 
-    const summary = { applied: 0, conflicts: 0, rejected: 0, maxAttempts: 0 };
+    const summary = { applied: 0, conflicts: 0, rejected: 0 };
 
     for (const result of data.results ?? []) {
         const row = await db.outbox.get(result.client_change_id);
@@ -429,8 +437,6 @@ async function push(db, userId) {
         if (!row) {
             continue;
         }
-
-        summary.maxAttempts = Math.max(summary.maxAttempts, row.attempts ?? 0);
 
         if (result.status === "applied") {
             summary.applied += 1;
@@ -1530,16 +1536,18 @@ async function boot() {
 
     // Pin the per-user database with a lock so only one tab syncs.
     const lockable = async () => {
-        let userId = pageUserId();
+        let userId = pageUserId() ?? lastUserId();
 
-        if (userId === null) {
-            userId = lastUserId();
-        } else if (navigator.onLine) {
+        if (navigator.onLine) {
             // The shell can be a cached copy from another session: when
             // online, always confirm identity against a fresh shell.
             const probed = await fetchPageUserId();
 
-            if (probed !== null) {
+            if (probed === null) {
+                // Confirmed signed out: never reopen the previous user.
+                forgetUserId();
+                userId = null;
+            } else if (probed !== undefined) {
                 userId = probed;
             }
         }

@@ -245,6 +245,51 @@ test('[AC-3] folder delete through sync moves notes to All Notes', function () {
         ->and($folder->fresh())->toBeNull();
 });
 
+test('[AC-3] folder delete updates trashed notes and records their changes', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Old folder']);
+    $active = $user->notes()->create([
+        'folder_id' => $folder->id,
+        'title' => 'Active note',
+        'content' => '',
+    ]);
+    $trashed = $user->notes()->create([
+        'folder_id' => $folder->id,
+        'title' => 'Trashed note',
+        'content' => '',
+    ]);
+    $trashed->delete();
+
+    $trashedVersion = Note::withTrashed()->findOrFail($trashed->id)->version;
+
+    $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => (string) Str::uuid(),
+                'entity_type' => 'folder',
+                'action' => 'deleted',
+                'portable_id' => $folder->portable_id,
+                'base_version' => 1,
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'applied');
+
+    $activeAfter = Note::withTrashed()->findOrFail($active->id);
+    $trashedAfter = Note::withTrashed()->findOrFail($trashed->id);
+
+    expect($activeAfter->folder_id)->toBeNull()
+        ->and($trashedAfter->folder_id)->toBeNull()
+        ->and($trashedAfter->trashed())->toBeTrue()
+        ->and($trashedAfter->version)->toBe($trashedVersion + 1);
+
+    expect(SyncChange::where('user_id', $user->id)
+        ->where('entity_type', 'note')
+        ->where('entity_portable_id', $trashed->portable_id)
+        ->where('action', 'updated')
+        ->exists())->toBeTrue();
+});
+
 test('[AC-10c] rejects a duplicate folder rename without applying it', function () {
     $user = User::factory()->create();
     $folder = $user->folders()->create(['name' => 'Alpha']);
@@ -637,3 +682,205 @@ test('[AC-2] a create change for an existing portable id does not duplicate the 
         ->and($note->fresh()->title)->toBe('Already here');
 });
 
+test('[AC-6] records one change row for every applied sync mutation', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Draft', 'content' => '']);
+
+    $updateId = (string) Str::uuid();
+    $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => $updateId,
+                'entity_type' => 'note',
+                'action' => 'updated',
+                'portable_id' => $note->portable_id,
+                'base_version' => $note->version,
+                'payload' => ['title' => 'Edited', 'content' => '<p>Body</p>', 'folder_portable_id' => null],
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'applied');
+
+    $trashId = (string) Str::uuid();
+    $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => $trashId,
+                'entity_type' => 'note',
+                'action' => 'deleted',
+                'portable_id' => $note->portable_id,
+                'base_version' => $note->fresh()->version,
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'applied');
+
+    $restoreId = (string) Str::uuid();
+    $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => $restoreId,
+                'entity_type' => 'note',
+                'action' => 'restored',
+                'portable_id' => $note->portable_id,
+                'base_version' => $note->fresh()->version,
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'applied');
+
+    $folderId = (string) Str::uuid();
+    $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => $folderId,
+                'entity_type' => 'folder',
+                'action' => 'created',
+                'portable_id' => (string) Str::uuid(),
+                'base_version' => 0,
+                'payload' => ['name' => 'Sync folder'],
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->assertOk();
+
+    $folder = $user->folders()->where('name', 'Sync folder')->firstOrFail();
+    $renameId = (string) Str::uuid();
+    $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => $renameId,
+                'entity_type' => 'folder',
+                'action' => 'updated',
+                'portable_id' => $folder->portable_id,
+                'base_version' => $folder->version,
+                'payload' => ['name' => 'Renamed folder'],
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->assertOk()
+        ->assertJsonPath('results.0.status', 'applied');
+
+    foreach ([$updateId => 'updated', $trashId => 'deleted', $restoreId => 'restored', $folderId => 'created', $renameId => 'updated'] as $clientChangeId => $action) {
+        $rows = SyncChange::where('user_id', $user->id)
+            ->where('client_change_id', $clientChangeId)
+            ->get();
+
+        expect($rows)->toHaveCount(1)
+            ->and($rows->first()->action)->toBe($action)
+            ->and($rows->first()->status)->toBe('applied');
+    }
+});
+
+test('[AC-2] a note update without a folder key keeps the current folder', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Keep']);
+    $note = $user->notes()->create([
+        'folder_id' => $folder->id,
+        'title' => 'In a folder',
+        'content' => '',
+    ]);
+
+    $response = $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => (string) Str::uuid(),
+                'entity_type' => 'note',
+                'action' => 'updated',
+                'portable_id' => $note->portable_id,
+                'base_version' => $note->version,
+                'payload' => ['title' => 'Still in a folder', 'content' => '<p>Text</p>'],
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest']);
+
+    $response->assertOk()->assertJsonPath('results.0.status', 'applied');
+
+    expect($note->fresh()->folder_id)->toBe($folder->id);
+});
+
+test('[AC-9] rejects a malformed change and applies the rest of the batch', function () {
+    $user = User::factory()->create();
+    $broken = $user->notes()->create(['title' => 'Broken', 'content' => '']);
+    $valid = $user->notes()->create(['title' => 'Valid', 'content' => '']);
+
+    $response = $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [
+                [
+                    'client_change_id' => (string) Str::uuid(),
+                    'entity_type' => 'note',
+                    'action' => 'updated',
+                    'portable_id' => $broken->portable_id,
+                    'base_version' => $broken->version,
+                    'payload' => ['title' => 'Broken', 'content' => ['not' => 'a string']],
+                ],
+                [
+                    'client_change_id' => (string) Str::uuid(),
+                    'entity_type' => 'note',
+                    'action' => 'updated',
+                    'portable_id' => $valid->portable_id,
+                    'base_version' => $valid->version,
+                    'payload' => ['title' => 'Applied', 'content' => '<p>Fine</p>', 'folder_portable_id' => null],
+                ],
+            ],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest']);
+
+    $response->assertOk()
+        ->assertJsonPath('results.0.status', 'rejected')
+        ->assertJsonPath('results.1.status', 'applied');
+
+    expect($valid->fresh()->title)->toBe('Applied');
+});
+
+test('[AC-9] keeps a rejection row when a change throws inside the transaction', function () {
+    $user = User::factory()->create();
+    $portableId = (string) Str::uuid();
+    $clientChangeId = (string) Str::uuid();
+
+    Note::creating(function (Note $note): void {
+        if ($note->title === 'Explode') {
+            throw new RuntimeException('boom');
+        }
+    });
+
+    $response = $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => $clientChangeId,
+                'entity_type' => 'note',
+                'action' => 'created',
+                'portable_id' => $portableId,
+                'base_version' => 0,
+                'payload' => ['title' => 'Explode', 'content' => '', 'folder_portable_id' => null],
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest']);
+
+    $response->assertOk()
+        ->assertJsonPath('results.0.status', 'rejected')
+        ->assertJsonPath('results.0.message', 'This change could not be applied.');
+
+    expect(Note::where('portable_id', $portableId)->exists())->toBeFalse();
+
+    $row = SyncChange::where('user_id', $user->id)
+        ->where('client_change_id', $clientChangeId)
+        ->first();
+
+    expect($row)->not->toBeNull()
+        ->and($row->status)->toBe('rejected')
+        ->and($row->error)->toBe('This change could not be applied.');
+});
+
+test('[AC-11] rejects a folder delete for a folder the user does not own', function () {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => (string) Str::uuid(),
+                'entity_type' => 'folder',
+                'action' => 'deleted',
+                'portable_id' => (string) Str::uuid(),
+                'base_version' => 1,
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest']);
+
+    $response->assertOk()->assertJsonPath('results.0.status', 'rejected');
+});
