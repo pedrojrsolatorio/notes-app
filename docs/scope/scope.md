@@ -19,7 +19,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 6 | Quick capture | Slice 2 | in-progress |
 | 7 | Note import and export | Slice 3 | in-progress |
 | 8 | Offline use and device sync | Slice 4 | in-progress |
-| 9 | Note reminders | Slice 5 | planned |
+| 9 | Note reminders | Slice 5 | in-progress |
 | 10 | Accessibility and responsive use | Slice 6 | planned |
 | 11 | Performance as notes grow | Slice 7 | planned |
 
@@ -96,10 +96,18 @@ Let you use notes across devices and keep working when a connection is unavailab
 spec [0004](../specs/0004-offline-use-and-device-sync/index.md)
 Code in `app/Sync/`, `app/Http/Controllers/SyncController.php`, `resources/views/pwa/notes.blade.php`, `resources/js/offline-app.js`, and `database/migrations/`.
 
-### 9. Note reminders · planned · needs a decision
+### 9. Note reminders · in-progress · Beta
 Help you return to a note at a time you choose.
 **Done when:** you can set, change, and clear a reminder, and receive its alert at the expected time.
-- [ ] Design it (spec): `/architect note reminders`
+- [x] Design it (spec): `/architect note reminders`
+- [ ] Build it: `/develop note reminders`
+  - [ ] Add reminder storage, local time handling, and notes page controls (AC-1, AC-2, AC-3)
+  - [ ] Queue generic email reminders with owner checked note links (AC-4, AC-5, AC-6, AC-7)
+  - [ ] Add retry, stale job, Trash, ownership, and offline sync boundaries (AC-5, AC-8, AC-9, AC-10, AC-11, AC-13)
+  - [ ] Keep reminders out of backups and restores (AC-12)
+- [ ] Verify it: `/check verify note reminders`
+- [ ] Test it: `/test note reminders`
+spec [0005](../specs/0005-note-reminders.md)
 
 ### 10. Accessibility and responsive use · planned
 Make common note tasks comfortable with keyboard, assistive technology, and narrow or wide screens.
