@@ -100,14 +100,18 @@ Code in `app/Sync/`, `app/Http/Controllers/SyncController.php`, `resources/views
 Help you return to a note at a time you choose.
 **Done when:** you can set, change, and clear a reminder, and receive its alert at the expected time.
 - [x] Design it (spec): `/architect note reminders`
-- [ ] Build it: `/develop note reminders`
-  - [ ] Add reminder storage, local time handling, and notes page controls (AC-1, AC-2, AC-3)
-  - [ ] Queue generic email reminders with owner checked note links (AC-4, AC-5, AC-6, AC-7)
-  - [ ] Add retry, stale job, Trash, ownership, and offline sync boundaries (AC-5, AC-8, AC-9, AC-10, AC-11, AC-13)
-  - [ ] Keep reminders out of backups and restores (AC-12)
+- [x] Build it: `/develop note reminders`
+  - [x] Add reminder storage, local time handling, and notes page controls (AC-1, AC-2, AC-3)
+  - [x] Queue generic email reminders with owner checked note links (AC-4, AC-5, AC-6, AC-7)
+  - [x] Add retry, stale job, Trash, ownership, and offline sync boundaries (AC-5, AC-8, AC-9, AC-10, AC-11, AC-13)
+  - [x] Keep reminders out of backups and restores (AC-12)
 - [ ] Verify it: `/check verify note reminders`
-- [ ] Test it: `/test note reminders`
+    Automated feature and time conversion tests pass, and the reminder migration and every-minute scheduler are present. Browser verification stopped at the login page because no signed-in test account was available. Real mail delivery and queue worker retry timing were not exercised.
+  - [x] Test it: `/test note reminders`
+    The focused reminder suite passes 24 tests and 118 assertions. The full PHP suite passes 184 tests and 804 assertions. All 4 local time conversion tests pass.
+  - [x] Document it: `/document pr`
 spec [0005](../specs/0005-note-reminders.md)
+Code in `app/Console/Commands/DispatchDueNoteReminders.php`, `app/Jobs/SendNoteReminder.php`, `app/Mail/NoteReminderMail.php`, `resources/views/components/notes/⚡index.blade.php`, `resources/js/note-reminder-time.js`, and `tests/Feature/NoteReminderTest.php`.
 
 ### 10. Accessibility and responsive use · planned
 Make common note tasks comfortable with keyboard, assistive technology, and narrow or wide screens.

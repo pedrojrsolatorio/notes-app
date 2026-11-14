@@ -201,9 +201,11 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 ## Architecture Map
 
 - `routes/web.php`: home, Google OAuth, and the `/app` shell are public; dashboard, `Route::livewire('/notes', 'notes.index')`, `/sync` GET and POST, and `note-attachments/{attachment}/download` are behind `auth`+`verified`.
-- `app/Models/`: `User` (Fortify/2FA/passkey traits, `#[Fillable]` incl. `google_id`, `#[Hidden]` incl. secrets + `google_id`), `Folder` (`version`), `Note` (SoftDeletes, `version` used for sync), `NoteAttachment`, and `SyncChange` (the change log cursor).
+- `app/Models/`: `User` (Fortify/2FA/passkey traits, `#[Fillable]` incl. `google_id`, `#[Hidden]` incl. secrets + `google_id`), `Folder` (`version`), `Note` (SoftDeletes, `version` used for sync, server-only reminder fields), `NoteAttachment`, and `SyncChange` (the change log cursor).
 - `app/Observers/UserObserver.php` — seeds Work/School/Personal/Projects on user `created`. Registered **once** via `User::observe()` in `AppServiceProvider::boot()`; never add `#[ObservedBy]` (double registration = duplicate folders).
 - `app/Observers/NoteObserver.php`, `FolderObserver.php`, and `NoteAttachmentObserver.php`: write `sync_changes` rows for note, folder, and attachment mutations. `App\Sync\ChangeRecorder::withoutRecording()` suppresses recording while a client change is applied, so sync does not log duplicate rows.
+- `app/Console/Commands/DispatchDueNoteReminders.php` queues due reminders; `routes/console.php` schedules it every minute. `app/Jobs/SendNoteReminder.php` checks the current reminder generation, note state, and verified owner email before delivery.
+- `app/Mail/NoteReminderMail.php` and `resources/views/mail/note-reminder.blade.php` send a generic message with a portable note link, never note content.
 - `app/Http/Controllers/Auth/GoogleController.php` — matches by `google_id`, falls back to email, links + verifies.
 - `app/Http/Controllers/NoteAttachmentController.php` — owner-checked download (403/404).
 - `app/Http/Controllers/SyncController.php`: session and CSRF protected `/sync` read and write API. `since` 0 returns a full snapshot; other values page the `sync_changes` cursor. Each change returns its own result, and stale note content creates a conflict copy in All Notes.
@@ -235,6 +237,7 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - `notes.version` and `folders.version` are the conflict bases. The client sends portable ids only, never server integer ids. A stale note content change creates a normal note titled `Conflict copy of <title>` in All Notes; a folder delete wins and moves its notes to All Notes.
 - The `/app` shell is public and probes the session. `/sync` stays behind `auth`+`verified` with session CSRF and is rate limited to 60 requests per minute. Every sync query is scoped to `auth()->user()`.
 - The Dexie database is per user (`notes-offline-{userId}`), and every local query filters by `user_id`. The service worker caches only the `/app` shell and never `/sync` or `/note-attachments/`. Attachments stay online only; sync sends a manifest without file bytes.
+- Reminder fields are server only and must stay out of offline sync and backup data. Reminder-only updates use direct database writes so they do not change note timestamps or versions or create `sync_changes` rows.
 
 ## Storage & Uploads
 
@@ -266,4 +269,7 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 
 ## Context files
 
+- [app/Jobs/AGENTS.md](app/Jobs/AGENTS.md): Reminder queue job state, stale jobs, and retries.
+- [app/Mail/AGENTS.md](app/Mail/AGENTS.md): Generic reminder email and its privacy boundary.
+- [resources/views/mail/AGENTS.md](resources/views/mail/AGENTS.md): Reminder email template content and privacy boundary.
 - [app/Services/NoteBackups/AGENTS.md](app/Services/NoteBackups/AGENTS.md): Backup archive, import validation, sanitization, staging, and restore rules.

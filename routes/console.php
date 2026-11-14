@@ -12,3 +12,7 @@ Artisan::command('inspire', function () {
 Schedule::command(CleanupNoteBackupStaging::class)
     ->hourly()
     ->withoutOverlapping(60);
+
+Schedule::command('app:dispatch-due-note-reminders')
+    ->everyMinute()
+    ->withoutOverlapping(2);

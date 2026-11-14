@@ -3,6 +3,8 @@
 use App\Models\Folder;
 use App\Models\Note;
 use App\Models\User;
+use Carbon\CarbonImmutable;
+use App\Jobs\SendNoteReminder;
 use Flux\Flux;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,195 @@ use Livewire\WithFileUploads;
 new class extends Component
 {
     use WithFileUploads;
+
+    #[Locked]
+    public ?int $reminderNoteId = null;
+
+    #[Locked]
+    public ?string $reminderAtUtc = null;
+
+    #[Locked]
+    public bool $unavailableNote = false;
+
+    #[Locked]
+    public int $reminderFormKey = 0;
+
+    public bool $showReminderModal = false;
+
+    public function mount(): void
+    {
+        $portableId = request()->query('note');
+
+        if ($portableId === null) {
+            return;
+        }
+
+        if (! is_string($portableId) || $portableId === '') {
+            $this->unavailableNote = true;
+
+            return;
+        }
+
+        $note = auth()->user()->notes()->where('portable_id', $portableId)->first();
+
+        if ($note === null) {
+            $this->unavailableNote = true;
+
+            return;
+        }
+
+        $this->selectNote($note->id);
+    }
+
+    public function openReminderModal(int $noteId): void
+    {
+        $note = auth()->user()->notes()->findOrFail($noteId);
+
+        $this->reminderNoteId = $note->id;
+        $this->reminderAtUtc = $note->reminder_at?->utc()->format('Y-m-d\TH:i:s.000\Z');
+        $this->reminderFormKey++;
+        $this->resetValidation('reminderAtUtc');
+        $this->showReminderModal = true;
+    }
+
+    public function saveReminder(int $noteId, mixed $reminderAtUtc): void
+    {
+        try {
+            $validated = Validator::make(
+                ['reminderAtUtc' => $reminderAtUtc],
+                [
+                    'reminderAtUtc' => [
+                        'required',
+                        'string',
+                        'regex:/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z\z/',
+                        'date',
+                    ],
+                ],
+                [
+                    'reminderAtUtc.required' => __('Choose a date and time.'),
+                    'reminderAtUtc.regex' => __('Choose a valid date and time.'),
+                    'reminderAtUtc.date' => __('Choose a valid date and time.'),
+                ],
+            )->validate();
+
+            $reminderAt = CarbonImmutable::parse($validated['reminderAtUtc'])->utc();
+
+            if ($reminderAt->lessThanOrEqualTo(now('UTC'))) {
+                throw ValidationException::withMessages([
+                    'reminderAtUtc' => __('Choose a time in the future.'),
+                ]);
+            }
+
+            DB::transaction(function () use ($noteId, $reminderAt): void {
+                $note = auth()->user()->notes()->withTrashed()->lockForUpdate()->findOrFail($noteId);
+
+                if ($note->trashed()) {
+                    throw ValidationException::withMessages([
+                        'reminderAtUtc' => __('Reminders cannot be changed in Trash.'),
+                    ]);
+                }
+
+                $hasReminderData = $note->reminder_at !== null
+                    || $note->reminder_status !== null
+                    || $note->reminder_generation !== null;
+
+                if (
+                    $hasReminderData
+                    && (
+                        $note->reminder_at === null
+                        || $note->reminder_status === null
+                        || $note->reminder_generation === null
+                    )
+                ) {
+                    throw new \LogicException('A note reminder has incomplete state.');
+                }
+
+                if ($note->reminder_at?->equalTo($reminderAt)) {
+                    return;
+                }
+
+                DB::table('notes')->where('id', $note->id)->update([
+                    'reminder_at' => $reminderAt->format('Y-m-d H:i:s'),
+                    'reminder_status' => 'scheduled',
+                    'reminder_generation' => (string) \Illuminate\Support\Str::uuid(),
+                ]);
+            });
+
+            $this->showReminderModal = false;
+            $this->reminderNoteId = null;
+            $this->reminderAtUtc = null;
+            $this->resetValidation('reminderAtUtc');
+
+            Flux::toast(variant: 'success', text: __('Reminder saved.'));
+        } catch (ValidationException $exception) {
+            Flux::toast(variant: 'danger', text: $exception->validator->errors()->first());
+
+            throw $exception;
+        }
+    }
+
+    public function clearReminder(int $noteId): void
+    {
+        DB::transaction(function () use ($noteId): void {
+            $note = auth()->user()->notes()->withTrashed()->lockForUpdate()->findOrFail($noteId);
+
+            DB::table('notes')->where('id', $note->id)->update([
+                'reminder_at' => null,
+                'reminder_status' => null,
+                'reminder_generation' => null,
+            ]);
+        });
+
+        Flux::toast(variant: 'success', text: __('Reminder cleared.'));
+    }
+
+    public function retryReminder(int $noteId): void
+    {
+        $result = DB::transaction(function () use ($noteId): string {
+            $note = auth()->user()->notes()->withTrashed()->lockForUpdate()->findOrFail($noteId);
+
+            if ($note->trashed()) {
+                return 'trash';
+            }
+
+            if ($note->reminder_status !== 'failed') {
+                return 'not_failed';
+            }
+
+            if (! $note->user?->hasVerifiedEmail()) {
+                return 'unverified';
+            }
+
+            if ($note->reminder_at === null || $note->reminder_generation === null) {
+                throw new \LogicException('A failed note reminder has incomplete state.');
+            }
+
+            $generation = (string) \Illuminate\Support\Str::uuid();
+
+            DB::table('notes')->where('id', $note->id)->update([
+                'reminder_status' => 'queued',
+                'reminder_generation' => $generation,
+            ]);
+
+            SendNoteReminder::dispatch($note->id, $generation)->beforeCommit();
+
+            return 'queued';
+        });
+
+        if ($result === 'queued') {
+            Flux::toast(variant: 'success', text: __('Reminder retry queued.'));
+
+            return;
+        }
+
+        $message = match ($result) {
+            'trash' => __('Reminders cannot be retried in Trash.'),
+            'unverified' => __('Verify your email address before retrying this reminder.'),
+            default => __('This reminder is not available to retry.'),
+        };
+
+        Flux::toast(variant: 'danger', text: $message);
+    }
 
     public ?int $selectedFolderId = null;
 
@@ -199,6 +390,8 @@ new class extends Component
 
     public function selectNote(int $noteId): void
     {
+        $this->unavailableNote = false;
+
         $note = auth()->user()->notes()->findOrFail($noteId);
 
         $this->selectedNoteId = $note->id;
@@ -370,9 +563,19 @@ new class extends Component
 
     public function restoreNote(int $noteId): void
     {
-        $note = auth()->user()->notes()->onlyTrashed()->findOrFail($noteId);
+        DB::transaction(function () use ($noteId): void {
+            $note = auth()->user()->notes()->onlyTrashed()->lockForUpdate()->findOrFail($noteId);
 
-        $note->restore();
+            if ($note->reminder_at?->lessThanOrEqualTo(now('UTC'))) {
+                DB::table('notes')->where('id', $note->id)->update([
+                    'reminder_at' => null,
+                    'reminder_status' => null,
+                    'reminder_generation' => null,
+                ]);
+            }
+
+            $note->restore();
+        });
 
         Flux::toast(variant: 'success', text: __('Note restored.'));
     }
@@ -663,6 +866,12 @@ new class extends Component
                 </select>
             </div>
 
+            @if ($unavailableNote)
+                <p class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100" role="status">
+                    {{ __('This note is no longer available') }}
+                </p>
+            @endif
+
             @if ($notes->isEmpty())
                 <p class="text-zinc-500">
                     No notes yet.
@@ -679,6 +888,51 @@ new class extends Component
                             <p class="mt-1 text-sm text-zinc-500">
                                 {{ \Illuminate\Support\Str::limit(html_entity_decode(strip_tags($note->content ?? '')), 120) }}
                             </p>
+                            @if ($note->reminder_at !== null)
+                                <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                                    <span>{{ __('Reminder') }}</span>
+                                    <time
+                                        datetime="{{ $note->reminder_at->utc()->toIso8601String() }}"
+                                        data-reminder-at="{{ $note->reminder_at->utc()->toIso8601String() }}"
+                                        x-data
+                                        x-text="window.noteReminderTime.formatReminderTime($el.dataset.reminderAt)"
+                                    >{{ $note->reminder_at->utc()->format('Y-m-d H:i') }} UTC</time>
+                                    <span class="rounded-full border px-2 py-1 text-xs">{{ __(ucfirst($note->reminder_status)) }}</span>
+                                </div>
+                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    @if ($isTrashView)
+                                        <button
+                                            type="button"
+                                            wire:click.stop="clearReminder({{ $note->id }})"
+                                            class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                        >{{ __('Clear reminder') }}</button>
+                                    @else
+                                        <button
+                                            type="button"
+                                            wire:click.stop="openReminderModal({{ $note->id }})"
+                                            class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                        >{{ __('Change') }}</button>
+                                        @if ($note->reminder_status === 'failed')
+                                            <button
+                                                type="button"
+                                                wire:click.stop="retryReminder({{ $note->id }})"
+                                                class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                            >{{ __('Retry now') }}</button>
+                                        @endif
+                                        <button
+                                            type="button"
+                                            wire:click.stop="clearReminder({{ $note->id }})"
+                                            class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                        >{{ __('Clear') }}</button>
+                                    @endif
+                                </div>
+                            @elseif (!$isTrashView)
+                                <button
+                                    type="button"
+                                    wire:click.stop="openReminderModal({{ $note->id }})"
+                                    class="mt-2 min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                >{{ __('Set reminder') }}</button>
+                            @endif
 
                             @if ($isTrashView)
                                 <button type="button" wire:click="restoreNote({{ $note->id }})"
@@ -1011,6 +1265,73 @@ new class extends Component
                 </flux:button>
             </div>
         </form>
+    </flux:modal>
+
+    <flux:modal name="note-reminder" wire:model="showReminderModal" class="min-w-0 w-full max-w-md">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Note reminder') }}</flux:heading>
+                <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                    {{ __('Choose when you would like an email reminder. The time uses your browser’s current time zone.') }}
+                </p>
+            </div>
+
+            @if ($reminderNoteId !== null)
+                <form
+                    wire:key="note-reminder-form-{{ $reminderFormKey }}"
+                    x-data="{
+                        localError: '',
+                        submitReminder(noteId, localValue) {
+                            this.localError = '';
+                            const utcValue = window.noteReminderTime.localDateTimeToUtc(localValue);
+
+                            if (!utcValue) {
+                                this.localError = @js(__('That local time does not exist. Choose another time.'));
+
+                                return;
+                            }
+
+                            $wire.saveReminder(noteId, utcValue);
+                        },
+                    }"
+                    x-on:submit.prevent="submitReminder(@js($reminderNoteId), $refs.reminderTime.value)"
+                >
+                    <flux:field>
+                        <flux:label for="reminder-at">{{ __('Date and time') }}</flux:label>
+                        <flux:input
+                            id="reminder-at"
+                            type="datetime-local"
+                            step="60"
+                            required
+                            x-ref="reminderTime"
+                            x-init="$el.value = window.noteReminderTime.utcToLocalDateTime(@js($reminderAtUtc))"
+                            aria-describedby="reminder-server-error reminder-local-error"
+                            aria-invalid="{{ $errors->has('reminderAtUtc') ? 'true' : 'false' }}"
+                        />
+                        <p id="reminder-server-error" class="text-sm text-red-600 dark:text-red-400" role="alert">
+                            @error('reminderAtUtc'){{ $message }}@enderror
+                        </p>
+                        <p
+                            id="reminder-local-error"
+                            class="text-sm text-red-600 dark:text-red-400"
+                            role="alert"
+                            x-show="localError"
+                            x-text="localError"
+                        ></p>
+                    </flux:field>
+
+                    <div class="flex items-center justify-end gap-2">
+                        <flux:modal.close>
+                            <flux:button type="button" variant="ghost">{{ __('Cancel') }}</flux:button>
+                        </flux:modal.close>
+                        <flux:button type="submit" variant="primary" wire:loading.attr="disabled">
+                            <span wire:loading.remove>{{ __('Save reminder') }}</span>
+                            <span wire:loading>{{ __('Saving') }}</span>
+                        </flux:button>
+                    </div>
+                </form>
+            @endif
+        </div>
     </flux:modal>
 
     <flux:modal name="quick-capture" wire:model="showQuickCaptureModal" wire:close="closeQuickCapture"
