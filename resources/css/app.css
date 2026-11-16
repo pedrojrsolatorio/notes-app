@@ -174,3 +174,49 @@ select:focus[data-flux-control] {
     font-weight: 600;
     background: #f4f4f5;
 }
+
+@layer base {
+    :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+        outline: 3px solid var(--color-accent) !important;
+        outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        ::before,
+        ::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            scroll-behavior: auto !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+
+    @media (forced-colors: active) {
+        :where(a, button, input, select, textarea, summary, [tabindex]) {
+            forced-color-adjust: auto;
+        }
+    }
+}
+
+.ProseMirror {
+    overflow-wrap: anywhere;
+}
+
+.ProseMirror:focus-visible {
+    outline: 3px solid var(--color-accent) !important;
+    outline-offset: 2px;
+}
+
+.ProseMirror .tableWrapper {
+    overflow-x: auto;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+    border-color: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.ProseMirror pre {
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}

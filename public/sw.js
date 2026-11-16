@@ -3,7 +3,7 @@
 // The sync API and attachment downloads are never cached. The app shell and
 // its hashed assets are served cache-first so the installed app opens offline.
 
-const CACHE_NAME = 'notes-offline-v1';
+const CACHE_NAME = 'notes-offline-v2';
 const PRECACHE = [
     '/app',
     '/manifest.webmanifest',
@@ -12,10 +12,30 @@ const PRECACHE = [
     '/apple-touch-icon.png',
 ];
 
+async function precacheShell() {
+    const cache = await caches.open(CACHE_NAME);
+
+    await cache.addAll(PRECACHE);
+
+    const response = await fetch('/app', { cache: 'no-cache' });
+
+    if (!response.ok) {
+        return;
+    }
+
+    const html = await response.text();
+
+    await cache.put('/app', new Response(html, {
+        headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+    }));
+
+    const assets = [...html.matchAll(/(?:src|href)="(\/build\/[^"]+)"/g)].map((match) => match[1]);
+
+    await Promise.all(assets.map((asset) => cache.add(asset).catch(() => {})));
+}
+
 self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE)),
-    );
+    event.waitUntil(precacheShell());
 });
 
 self.addEventListener('activate', (event) => {

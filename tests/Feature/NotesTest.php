@@ -711,7 +711,7 @@ test('includes the queued upload in the file picker cancel handler', function ()
     );
 });
 
-test('fades the required attachment error after it is displayed', function () {
+test('keeps the required attachment error visible', function () {
     $user = User::factory()->create();
     $note = $user->notes()->create(['title' => 'Old', 'content' => 'old']);
     $this->actingAs($user);
@@ -722,8 +722,8 @@ test('fades the required attachment error after it is displayed', function () {
         ->assertHasErrors('attachment')
         ->assertSet('attachmentValidationAttempt', 1)
         ->assertSee('The attachment field is required.')
-        ->assertSeeHtml('x-init="setTimeout(() => visible = false, 5000)"')
-        ->assertSeeHtml('x-show="visible"');
+        ->assertSeeHtml('role="alert"')
+        ->assertDontSeeHtml('setTimeout(() => visible = false, 5000)');
 });
 
 test('rejects an upload exceeding the size limit', function () {

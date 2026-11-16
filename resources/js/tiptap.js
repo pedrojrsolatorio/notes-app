@@ -11,7 +11,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import Highlight from "@tiptap/extension-highlight";
 
-export function createTiptapEditor(element, content = "") {
+export function createTiptapEditor(element, content = "", options = {}) {
     return new Editor({
         element,
 
@@ -40,7 +40,7 @@ export function createTiptapEditor(element, content = "") {
             }),
 
             Table.configure({
-                resizable: true,
+                resizable: options.resizable ?? true,
             }),
             TableRow,
             TableHeader,
@@ -50,6 +50,12 @@ export function createTiptapEditor(element, content = "") {
         content,
 
         editorProps: {
+            attributes: {
+                role: "textbox",
+                "aria-multiline": "true",
+                "aria-label": options.label ?? "Note content",
+            },
+
             handleClick(view, pos, event) {
                 if (!event.ctrlKey) {
                     return false;
@@ -74,14 +80,14 @@ export function createTiptapEditor(element, content = "") {
     });
 }
 
-export function createTiptapComponent(content = "") {
+export function createTiptapComponent(content = "", options = {}) {
     let editor = null;
 
     return {
         activeFormats: {},
 
         init() {
-            editor = createTiptapEditor(this.$refs.editor, content);
+            editor = createTiptapEditor(this.$refs.editor, content, options);
 
             editor.on("selectionUpdate", () => {
                 this.updateActiveFormats();
@@ -119,6 +125,7 @@ export function createTiptapComponent(content = "") {
                 taskList: editor.isActive("taskList"),
                 codeBlock: editor.isActive("codeBlock"),
                 table: editor.isActive("table"),
+                tableWidth: this.getTableWidthPreset(),
 
                 paragraph: editor.isActive("paragraph"),
                 heading1: editor.isActive("heading", { level: 1 }),
@@ -386,6 +393,125 @@ export function createTiptapComponent(content = "") {
             }
 
             return "#000000";
+        },
+
+
+        getTableInfo() {
+            if (!editor) {
+                return null;
+            }
+
+            const { $from } = editor.state.selection;
+
+            for (let depth = $from.depth; depth > 0; depth--) {
+                const node = $from.node(depth);
+
+                if (node.type.name === "table") {
+                    return { node, pos: $from.before(depth) };
+                }
+            }
+
+            return null;
+        },
+
+        getTableWidth() {
+            const info = this.getTableInfo();
+
+            if (!info) {
+                return null;
+            }
+
+            const firstRow = info.node.firstChild;
+            const widths = [];
+
+            if (!firstRow) {
+                return null;
+            }
+
+            firstRow.forEach((cell) => {
+                if (!Array.isArray(cell.attrs.colwidth) || cell.attrs.colwidth.length === 0) {
+                    return;
+                }
+
+                widths.push(...cell.attrs.colwidth);
+            });
+
+            if (widths.length === 0 || widths.some((width) => !Number.isFinite(Number(width)))) {
+                return null;
+            }
+
+            return widths.reduce((total, width) => total + Number(width), 0);
+        },
+
+        getTableWidthPreset() {
+            const width = this.getTableWidth();
+
+            if (width === null) {
+                return null;
+            }
+
+            return [
+                ["narrow", 360],
+                ["medium", 540],
+                ["wide", 720],
+            ].find(([, presetWidth]) => Math.abs(width - presetWidth) <= 40)?.[0] ?? null;
+        },
+
+        setTableWidth(percent) {
+            if (!editor) {
+                return;
+            }
+
+            const info = this.getTableInfo();
+
+            if (!info) {
+                return;
+            }
+
+            const table = info.node;
+            const firstRow = table.firstChild;
+
+            if (!firstRow) {
+                return;
+            }
+
+            let columnCount = 0;
+
+            firstRow.forEach((cell) => {
+                columnCount += cell.attrs.colspan ?? 1;
+            });
+
+            const totalWidth = percent === null ? null : Math.round((720 * percent) / 100);
+            const baseWidth = totalWidth === null ? null : Math.floor(totalWidth / columnCount);
+            const widths = totalWidth === null
+                ? null
+                : Array.from({ length: columnCount }, (_, index) => (
+                    index === columnCount - 1
+                        ? totalWidth - baseWidth * (columnCount - 1)
+                        : baseWidth
+                ));
+
+            let transaction = editor.state.tr;
+
+            table.forEach((row, rowOffset) => {
+                const rowPos = info.pos + 1 + rowOffset;
+                let column = 0;
+
+                row.forEach((cell, cellOffset) => {
+                    const cellPos = rowPos + 1 + cellOffset;
+                    const colspan = cell.attrs.colspan ?? 1;
+
+                    transaction = transaction.setNodeMarkup(cellPos, undefined, {
+                        ...cell.attrs,
+                        colwidth: widths === null ? null : widths.slice(column, column + colspan),
+                    });
+
+                    column += colspan;
+                });
+            });
+
+            editor.view.dispatch(transaction);
+            editor.commands.focus();
         },
 
         insertTable() {

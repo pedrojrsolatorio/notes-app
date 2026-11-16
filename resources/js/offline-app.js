@@ -642,6 +642,15 @@ async function trashNote(portableId) {
         return;
     }
 
+    const siblings = (await filteredNotes()).map((note) => note.portable_id);
+    const index = siblings.indexOf(portableId);
+    const nextId = index === -1 ? null : (siblings[index + 1] ?? siblings[index - 1] ?? null);
+
+    uiState.selectedNoteId = null;
+    uiState.mobileView = "list";
+    uiState.focusNoteId = nextId;
+    uiState.focusListHeading = nextId === null;
+
     if (local.last_synced_at == null) {
         await db.notes.delete(portableId);
         await db.outbox.where("user_id").equals(userId)
@@ -679,6 +688,10 @@ async function restoreNote(portableId) {
         return;
     }
 
+    uiState.selectedNoteId = null;
+    uiState.mobileView = "list";
+    uiState.focusListHeading = true;
+
     await db.notes.update(portableId, {
         deleted_at: null,
         updated_at: nowIso(),
@@ -705,6 +718,15 @@ async function purgeNote(portableId) {
     if (!local) {
         return;
     }
+
+    const siblings = (await filteredNotes()).map((note) => note.portable_id);
+    const index = siblings.indexOf(portableId);
+    const nextId = index === -1 ? null : (siblings[index + 1] ?? siblings[index - 1] ?? null);
+
+    uiState.selectedNoteId = null;
+    uiState.mobileView = "list";
+    uiState.focusNoteId = nextId;
+    uiState.focusListHeading = nextId === null;
 
     if (local.last_synced_at == null) {
         await db.notes.delete(portableId);
@@ -800,6 +822,12 @@ async function deleteFolder(portableId) {
             });
     });
 
+    if (uiState.selectedNoteId) {
+        uiState.focusFolderSelect = true;
+    } else {
+        uiState.focusListHeading = true;
+    }
+
     if (local.last_synced_at == null) {
         await db.outbox.where("user_id").equals(userId)
             .filter((row) => row.entity_type === "folder" && row.entity_portable_id === portableId)
@@ -885,9 +913,15 @@ const uiState = {
     search: "",
     sort: "newest",
     selectedNoteId: null,
+    mobileView: "list",
+    focusNoteId: null,
+    focusEditorHeading: false,
+    focusListHeading: false,
+    focusFolderSelect: false,
     editor: null,
     editorNoteId: null,
     editorMount: null,
+    editorDeletedAt: null,
 };
 
 function notice(message) {
@@ -975,7 +1009,43 @@ async function renderStatus() {
         lastSyncAt = await metaGet(runtime.db, "last_sync_at", null);
     }
 
-    bar.replaceChildren();
+    let dot = document.getElementById("status-dot");
+    let text = document.getElementById("status-text");
+    let signIn = document.getElementById("status-sign-in");
+    let lastSync = document.getElementById("status-last-sync");
+    let pendingText = document.getElementById("status-pending");
+    let retry = document.getElementById("status-sync-now");
+
+    if (!dot) {
+        dot = el("span", { id: "status-dot", class: "inline-block h-2 w-2 rounded-full", "aria-hidden": "true" });
+        text = el("span", { id: "status-text" });
+        signIn = el("a", {
+            id: "status-sign-in",
+            href: "/login?redirect=/app",
+            class: "inline-flex min-h-11 items-center rounded border px-3 py-1 text-sm font-medium underline",
+            text: "Sign in to sync",
+        });
+        lastSync = el("span", { id: "status-last-sync", class: "text-zinc-500" });
+        pendingText = el("span", { id: "status-pending", class: "text-zinc-500" });
+        retry = el("button", {
+            id: "status-sync-now",
+            type: "button",
+            class: "min-h-11 rounded border px-3 py-1 text-sm font-medium",
+            text: "Sync now",
+            onclick: () => syncNow({ manual: true }),
+        });
+
+        const summary = el("div", {
+            id: "status-summary",
+            class: "inline-flex flex-wrap items-center gap-3",
+            role: "status",
+            "aria-live": "polite",
+            "aria-atomic": "true",
+        });
+
+        summary.append(dot, text, lastSync, pendingText);
+        bar.append(summary, signIn, retry);
+    }
 
     const dotColor = runtime.needsSignIn
         ? "bg-red-500"
@@ -985,40 +1055,30 @@ async function renderStatus() {
                 ? "bg-emerald-500"
                 : "bg-zinc-400";
 
-    const parts = [
-        el("span", { class: `inline-block h-2 w-2 rounded-full ${dotColor}`, "aria-hidden": "true" }),
-        el("span", { text: statusText() }),
-    ];
+    dot.className = `inline-block h-2 w-2 rounded-full ${dotColor}`;
 
-    if (runtime.needsSignIn) {
-        parts.push(el("a", {
-            href: "/login",
-            class: "rounded border px-3 py-1 text-sm font-medium underline",
-            text: "Sign in to sync",
-        }));
+    const nextStatus = statusText();
+    if (text.textContent !== nextStatus) {
+        text.textContent = nextStatus;
     }
 
-    if (lastSyncAt) {
-        parts.push(el("span", { class: "text-zinc-500", text: `Last sync ${new Date(lastSyncAt).toLocaleString()}` }));
+    signIn.classList.toggle("hidden", !runtime.needsSignIn);
+
+    const nextLastSync = lastSyncAt ? `Last sync ${new Date(lastSyncAt).toLocaleString()}` : "";
+    if (lastSync.textContent !== nextLastSync) {
+        lastSync.textContent = nextLastSync;
     }
 
-    parts.push(el("span", { class: "text-zinc-500", text: `${pending} pending` }));
+    lastSync.classList.toggle("hidden", !lastSyncAt);
 
-    const retry = el("button", {
-        type: "button",
-        class: "rounded border px-3 py-1 text-sm font-medium",
-        text: runtime.syncing ? "Syncing…" : "Sync now",
-        onclick: () => syncNow({ manual: true }),
-    });
-
-    if (runtime.syncing) {
-        retry.disabled = true;
+    const nextPending = `${pending} pending`;
+    if (pendingText.textContent !== nextPending) {
+        pendingText.textContent = nextPending;
     }
 
-    parts.push(retry);
+    retry.textContent = runtime.syncing ? "Syncing…" : "Sync now";
+    retry.disabled = runtime.syncing;
 
-    bar.append(...parts);
-    renderNotices();
 }
 
 async function filteredNotes() {
@@ -1076,7 +1136,7 @@ async function renderFolders(folders) {
 
     const item = (label, active, onclick) => el("button", {
         type: "button",
-        class: `block w-full rounded-lg px-3 py-2 text-left text-sm ${active ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`,
+        class: `block min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm ${active ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`,
         text: label,
         onclick,
     });
@@ -1084,6 +1144,7 @@ async function renderFolders(folders) {
     container.append(item("All Notes", !uiState.folderId && uiState.view !== "trash", () => {
         uiState.folderId = null;
         uiState.view = "all";
+        uiState.mobileView = "list";
         renderAll();
     }));
 
@@ -1095,12 +1156,13 @@ async function renderFolders(folders) {
         row.append(item(folder.name, uiState.folderId === folder.portable_id, () => {
             uiState.folderId = folder.portable_id;
             uiState.view = "all";
+            uiState.mobileView = "list";
             renderAll();
         }));
 
         const rename = el("button", {
             type: "button",
-            class: "rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800",
+            class: "min-h-11 min-w-11 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800",
             text: "Rename",
             onclick: async () => {
                 const name = window.prompt("Folder name", folder.name);
@@ -1113,7 +1175,7 @@ async function renderFolders(folders) {
 
         const remove = el("button", {
             type: "button",
-            class: "rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950",
+            class: "min-h-11 min-w-11 rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950",
             text: "Delete",
             onclick: async () => {
                 if (window.confirm(`Delete folder "${folder.name}"? Its notes stay in All Notes.`)) {
@@ -1133,17 +1195,19 @@ async function renderFolders(folders) {
     container.append(item("Trash", uiState.view === "trash", () => {
         uiState.view = "trash";
         uiState.folderId = null;
+        uiState.mobileView = "list";
         renderAll();
     }));
 
     const newFolder = el("button", {
         type: "button",
-        class: "mt-2 w-full rounded-lg border px-3 py-2 text-sm font-medium",
+        class: "mt-2 min-h-11 w-full rounded-lg border px-3 py-2 text-sm font-medium",
         text: "+ New folder",
         onclick: async () => {
             const name = window.prompt("Folder name");
             if (name && name.trim() !== "") {
                 uiState.folderId = await createFolder(name.trim());
+                uiState.mobileView = "list";
                 renderAll();
             }
         },
@@ -1175,9 +1239,15 @@ async function renderList() {
         const preview = plainText(note.content);
         const item = el("button", {
             type: "button",
-            class: `block w-full rounded-lg border p-3 text-left ${active ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-800"}`,
+            "data-note-id": note.portable_id,
+            "aria-current": active ? "true" : "false",
+            "aria-label": note.title || "Untitled note",
+            class: `block min-h-11 w-full rounded-lg border p-3 text-left focus-visible:outline-3 focus-visible:outline-offset-2 ${active ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-800"}`,
             onclick: () => {
                 uiState.selectedNoteId = note.portable_id;
+                uiState.mobileView = "editor";
+                uiState.focusNoteId = note.portable_id;
+                uiState.focusEditorHeading = true;
                 renderAll();
             },
         });
@@ -1201,6 +1271,42 @@ async function renderList() {
 
         container.append(item);
     }
+
+    if (uiState.focusNoteId && uiState.mobileView === "list") {
+        container.querySelector(`[data-note-id="${uiState.focusNoteId}"]`)?.focus();
+        uiState.focusNoteId = null;
+    } else if (uiState.mobileView !== "list") {
+        uiState.focusNoteId = null;
+    }
+
+    if (uiState.focusListHeading) {
+        document.getElementById("note-list-heading")?.focus();
+        uiState.focusListHeading = false;
+    }
+}
+
+function backToNoteList() {
+    uiState.mobileView = "list";
+    updateMobileView();
+
+    const current = document.querySelector('#note-list [aria-current="true"]');
+
+    (current ?? document.getElementById("note-list-heading"))?.focus();
+}
+
+function showEditorError(message) {
+    const input = document.getElementById("note-title");
+    const error = document.getElementById("note-title-error");
+
+    if (error) {
+        error.textContent = message;
+        error.classList.remove("hidden");
+    }
+
+    if (input) {
+        input.setAttribute("aria-invalid", "true");
+        input.focus();
+    }
 }
 
 async function renderEditor() {
@@ -1217,6 +1323,8 @@ async function renderEditor() {
             uiState.editor.destroy();
             uiState.editor = null;
             uiState.editorNoteId = null;
+            uiState.editorMount = null;
+            uiState.editorDeletedAt = null;
         }
 
         panel.replaceChildren(
@@ -1226,94 +1334,136 @@ async function renderEditor() {
             }),
         );
 
+        updateMobileView();
+
         return;
     }
 
     const mountInDom = uiState.editor
         && document.getElementById("note-editor") === uiState.editorMount;
+    const stateChanged = uiState.editorDeletedAt !== (note.deleted_at ?? null);
 
-    if (uiState.editorNoteId !== note.portable_id || !mountInDom) {
+    if (uiState.editorNoteId !== note.portable_id || !mountInDom || stateChanged) {
         if (uiState.editor) {
             uiState.editor.destroy();
         }
 
+        const titleInput = el("input", {
+            id: "note-title",
+            type: "text",
+            required: "required",
+            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-lg font-semibold dark:bg-zinc-900 dark:border-zinc-800",
+            value: note.title,
+            placeholder: "Title",
+            "aria-describedby": "note-title-error",
+            "aria-invalid": "false",
+        });
+
+        const folderSelect = el("select", {
+            id: "note-folder",
+            class: "min-h-11 w-full rounded-lg border px-2 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
+        });
+
+        const titleError = el("p", {
+            id: "note-title-error",
+            role: "alert",
+            class: "hidden text-sm text-red-600 dark:text-red-400",
+        });
+
         panel.replaceChildren(
-            el("div", { class: "space-y-3" },
-                [
-                    el("div", { class: "flex items-center gap-2" }, [
-                        el("input", {
-                            id: "note-title",
-                            type: "text",
-                            class: "w-full rounded-lg border px-3 py-2 text-lg font-semibold dark:bg-zinc-900 dark:border-zinc-800",
-                            value: note.title,
-                            placeholder: "Title",
-                        }),
-                        el("select", {
-                            id: "note-folder",
-                            class: "rounded-lg border px-2 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                        }),
-                    ]),
-                    el("div", { id: "note-editor", class: "min-h-[180px] rounded-lg border p-3 dark:border-zinc-800" }),
-                    el("div", { class: "flex flex-wrap items-center gap-2" }, [
-                        el("button", {
+            el("div", { class: "space-y-3" }, [
+                el("div", { class: "flex items-center gap-3" }, [
+                    el("button", {
+                        type: "button",
+                        class: "min-h-11 rounded-lg border px-3 py-2 text-sm font-medium lg:hidden",
+                        text: "Back to notes",
+                        onclick: backToNoteList,
+                    }),
+                    el("h2", {
+                        id: "note-editor-heading",
+                        tabindex: "-1",
+                        class: "text-xl font-semibold focus:outline-none",
+                        text: "Edit note",
+                    }),
+                ]),
+                el("div", { class: "space-y-1" }, [
+                    el("label", { for: "note-title", class: "block text-sm font-medium", text: "Title" }),
+                    titleInput,
+                    titleError,
+                ]),
+                el("div", { class: "space-y-1" }, [
+                    el("label", { for: "note-folder", class: "block text-sm font-medium", text: "Folder" }),
+                    folderSelect,
+                ]),
+                el("div", {
+                    id: "note-editor",
+                    class: "min-h-[180px] rounded-lg border p-3 dark:border-zinc-800",
+                    "aria-label": "Note content",
+                }),
+                el("div", { class: "flex flex-wrap items-center gap-2" }, [
+                    el("button", {
+                        type: "button",
+                        class: "min-h-11 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
+                        text: "Save",
+                        onclick: async () => {
+                            const title = document.getElementById("note-title").value;
+                            const folderId = document.getElementById("note-folder").value || null;
+                            const content = uiState.editor ? uiState.editor.getHTML() : "";
+
+                            if (title.trim() === "") {
+                                showEditorError("A note needs a title.");
+                                return;
+                            }
+
+                            await saveNote(note.portable_id, {
+                                title: title.trim(),
+                                content,
+                                folder_portable_id: folderId,
+                            });
+
+                            document.getElementById("note-title")?.removeAttribute("aria-invalid");
+                            document.getElementById("note-title-error")?.classList.add("hidden");
+                            uiState.editor?.commands.focus();
+                        },
+                    }),
+                    note.deleted_at
+                        ? el("button", {
                             type: "button",
-                            class: "rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
-                            text: "Save",
+                            class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium",
+                            text: "Restore",
                             onclick: async () => {
-                                const title = document.getElementById("note-title").value;
-                                const folderId = document.getElementById("note-folder").value || null;
-                                const content = uiState.editor ? uiState.editor.getHTML() : "";
-
-                                if (title.trim() === "") {
-                                    notice("A note needs a title.");
-                                    return;
-                                }
-
-                                await saveNote(note.portable_id, {
-                                    title: title.trim(),
-                                    content,
-                                    folder_portable_id: folderId,
-                                });
+                                await restoreNote(note.portable_id);
+                            },
+                        })
+                        : el("button", {
+                            type: "button",
+                            class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium",
+                            text: "Move to Trash",
+                            onclick: async () => {
+                                await trashNote(note.portable_id);
                             },
                         }),
-                        note.deleted_at
-                            ? el("button", {
-                                type: "button",
-                                class: "rounded-lg border px-4 py-2 text-sm font-medium",
-                                text: "Restore",
-                                onclick: async () => {
-                                    await restoreNote(note.portable_id);
-                                },
-                            })
-                            : el("button", {
-                                type: "button",
-                                class: "rounded-lg border px-4 py-2 text-sm font-medium",
-                                text: "Move to Trash",
-                                onclick: async () => {
-                                    await trashNote(note.portable_id);
-                                },
-                            }),
-                        note.deleted_at
-                            ? el("button", {
-                                type: "button",
-                                class: "rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600",
-                                text: "Delete forever",
-                                onclick: async () => {
-                                    if (window.confirm("Delete this note forever?")) {
-                                        await purgeNote(note.portable_id);
-                                        uiState.selectedNoteId = null;
-                                    }
-                                },
-                            })
-                            : null,
-                    ]),
-                    note.attachments?.length
-                        ? el("div", {
-                            class: "rounded-lg bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400",
-                            text: `${note.attachments.length} attachment${note.attachments.length === 1 ? "" : "s"} on the server. Attachments need a connection to view.`,
+                    note.deleted_at
+                        ? el("button", {
+                            type: "button",
+                            class: "min-h-11 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600",
+                            text: "Delete forever",
+                            onclick: async () => {
+                                if (window.confirm("Delete this note forever?")) {
+                                    await purgeNote(note.portable_id);
+                                    uiState.selectedNoteId = null;
+                                }
+                            },
                         })
                         : null,
                 ]),
+                note.attachments?.length
+                    ? el("div", {
+                        class: "rounded-lg bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400",
+                        text: `${note.attachments.length} attachment${note.attachments.length === 1 ? "" : "s"} on the server. Attachments need a connection to view.`,
+                    })
+                    : null,
+            ]),
         );
 
         const folders = await runtime.db.folders.where("user_id").equals(runtime.userId).toArray();
@@ -1330,15 +1480,204 @@ async function renderEditor() {
             select.append(option);
         }
 
-        uiState.editor = createTiptapEditor(document.getElementById("note-editor"), note.content ?? "");
+        uiState.editor = createTiptapEditor(
+            document.getElementById("note-editor"),
+            note.content ?? "",
+            { resizable: false, label: "Note content" },
+        );
         uiState.editorMount = document.getElementById("note-editor");
         uiState.editorNoteId = note.portable_id;
+        uiState.editorDeletedAt = note.deleted_at ?? null;
     } else {
         const titleInput = document.getElementById("note-title");
+
         if (titleInput && document.activeElement !== titleInput) {
             titleInput.value = note.title;
         }
     }
+
+    updateMobileView();
+
+    if (uiState.focusEditorHeading) {
+        document.getElementById("note-editor-heading")?.focus();
+        uiState.focusEditorHeading = false;
+    }
+
+    if (uiState.focusFolderSelect) {
+        document.getElementById("note-folder")?.focus();
+        uiState.focusFolderSelect = false;
+    }
+}
+
+function updateMobileView() {
+    const list = document.getElementById("note-list-wrapper");
+    const editor = document.getElementById("editor-panel");
+
+    if (list) {
+        list.classList.toggle("max-lg:hidden", uiState.mobileView === "editor");
+    }
+
+    if (editor) {
+        editor.classList.toggle("max-lg:hidden", uiState.mobileView === "list");
+    }
+}
+
+async function captureThought() {
+    const area = document.getElementById("capture-text");
+    const parsed = captureToNote(area.value);
+
+    const error = document.getElementById("capture-error");
+
+    if (!parsed) {
+        if (error) {
+            error.textContent = "Write something to capture.";
+            error.classList.remove("hidden");
+        }
+
+        area.setAttribute("aria-invalid", "true");
+        area.focus();
+        return;
+    }
+
+    if (error) {
+        error.textContent = "";
+        error.classList.add("hidden");
+    }
+
+    area.setAttribute("aria-invalid", "false");
+
+    const portableId = crypto.randomUUID();
+
+    await runtime.db.notes.put({
+        portable_id: portableId,
+        user_id: runtime.userId,
+        folder_portable_id: null,
+        title: parsed.title,
+        content: parsed.content,
+        version: 0,
+        deleted_at: null,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+        attachments: [],
+        sync_state: "pending",
+        last_synced_at: null,
+    });
+
+    await queueOutbox(runtime.db, runtime.userId, {
+        entity_type: "note",
+        entity_portable_id: portableId,
+        action: "created",
+        payload: { title: parsed.title, content: parsed.content, folder_portable_id: null },
+        base_version: 0,
+    });
+
+    area.value = "";
+    uiState.selectedNoteId = portableId;
+    uiState.mobileView = "editor";
+    uiState.focusEditorHeading = true;
+    renderAll();
+    syncNow();
+}
+
+function mountShell() {
+    if (!root || document.getElementById("offline-shell")) {
+        return;
+    }
+
+    root.replaceChildren(
+        el("a", {
+            href: "#main-content",
+            class: "fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0 dark:bg-white dark:text-black",
+            text: "Skip to content",
+        }),
+        el("div", { id: "offline-shell", class: "mx-auto flex min-h-screen max-w-6xl flex-col gap-4 p-4" }, [
+            el("header", { class: "flex flex-wrap items-center justify-between gap-3" }, [
+                el("h1", { class: "text-xl font-bold", text: "Notes" }),
+                el("div", { id: "status-bar", class: "flex flex-wrap items-center gap-3 text-sm" }),
+            ]),
+            el("div", { id: "status-notices", class: "flex flex-col gap-2", role: "status", "aria-live": "polite" }),
+            el("div", { id: "update-banner", class: "hidden" }),
+            el("main", { id: "main-content", tabindex: "-1", class: "grid flex-1 gap-4 md:grid-cols-[220px_1fr]" }, [
+                el("aside", { class: "space-y-3", "aria-label": "Notes and folders" }, [
+                    el("div", { class: "space-y-2" }, [
+                        el("label", { for: "capture-text", class: "block text-sm font-medium", text: "Quick capture" }),
+                        el("textarea", {
+                            id: "capture-text",
+                            rows: 3,
+                            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
+                            placeholder: "Capture a thought…",
+                            "aria-keyshortcuts": "Alt+Shift+N",
+                            "aria-describedby": "capture-help capture-error",
+                            "aria-invalid": "false",
+                        }),
+                        el("p", { id: "capture-help", class: "text-xs text-zinc-500", text: "The first line becomes the title." }),
+                        el("p", { id: "capture-error", role: "alert", class: "hidden text-sm text-red-600 dark:text-red-400" }),
+                        el("button", {
+                            type: "button",
+                            class: "min-h-11 w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
+                            text: "Capture",
+                            onclick: captureThought,
+                        }),
+                    ]),
+                    el("div", { class: "space-y-1" }, [
+                        el("label", { for: "note-search", class: "block text-sm font-medium", text: "Search notes" }),
+                        el("input", {
+                            id: "note-search",
+                            type: "search",
+                            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
+                            placeholder: "Search notes…",
+                            value: uiState.search,
+                        }),
+                    ]),
+                    el("div", { class: "space-y-1" }, [
+                        el("label", { for: "note-sort", class: "block text-sm font-medium", text: "Sort by" }),
+                        el("select", {
+                            id: "note-sort",
+                            class: "min-h-11 w-full rounded-lg border px-2 py-1 text-sm dark:bg-zinc-900 dark:border-zinc-800",
+                        }, [
+                            el("option", { value: "newest", text: "Newest" }),
+                            el("option", { value: "oldest", text: "Oldest" }),
+                            el("option", { value: "title_az", text: "Title A to Z" }),
+                            el("option", { value: "title_za", text: "Title Z to A" }),
+                        ]),
+                    ]),
+                    el("nav", { id: "folder-list", class: "space-y-1", "aria-label": "Folders" }),
+                ]),
+                el("section", {
+                    class: "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]",
+                    "aria-labelledby": "note-list-heading",
+                }, [
+                    el("div", { id: "note-list-wrapper", "data-note-list": "", class: "min-w-0" }, [
+                        el("h2", {
+                            id: "note-list-heading",
+                            tabindex: "-1",
+                            class: "mb-2 text-lg font-semibold focus:outline-none",
+                            text: "Notes",
+                        }),
+                        el("div", { id: "note-list", class: "space-y-2 lg:max-h-[70vh] lg:overflow-auto" }),
+                    ]),
+                    el("div", { id: "editor-panel", class: "min-w-0" }),
+                ]),
+            ]),
+        ]),
+    );
+
+    const search = document.getElementById("note-search");
+    search.addEventListener("input", () => {
+        uiState.search = search.value;
+        uiState.mobileView = "list";
+        updateMobileView();
+        renderList();
+    });
+
+    const sort = document.getElementById("note-sort");
+    sort.value = uiState.sort;
+    sort.addEventListener("change", () => {
+        uiState.sort = sort.value;
+        uiState.mobileView = "list";
+        updateMobileView();
+        renderList();
+    });
 }
 
 async function renderAll() {
@@ -1351,116 +1690,14 @@ async function renderAll() {
         return;
     }
 
+    mountShell();
+
     const folders = await runtime.db.folders.where("user_id").equals(runtime.userId).toArray();
 
-    root.replaceChildren(
-        el("div", { class: "mx-auto flex min-h-screen max-w-6xl flex-col gap-4 p-4" }, [
-            el("header", { class: "flex items-center justify-between gap-3" }, [
-                el("h1", { class: "text-xl font-bold", text: "Notes" }),
-                el("div", { id: "status-bar", class: "flex flex-wrap items-center gap-3 text-sm" }),
-            ]),
-            el("div", { id: "status-notices", class: "flex flex-col gap-2" }),
-            el("div", { id: "update-banner", class: "hidden" }),
-            el("main", { class: "grid flex-1 gap-4 md:grid-cols-[220px_1fr]" }, [
-                el("aside", { class: "space-y-2" }, [
-                    el("div", { class: "space-y-2" }, [
-                        el("textarea", {
-                            id: "capture-text",
-                            rows: 3,
-                            class: "w-full rounded-lg border px-3 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                            placeholder: "Capture a thought…",
-                        }),
-                        el("button", {
-                            type: "button",
-                            class: "w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
-                            text: "Capture",
-                            onclick: async () => {
-                                const area = document.getElementById("capture-text");
-                                const parsed = captureToNote(area.value);
-
-                                if (!parsed) {
-                                    notice("Write something to capture.");
-                                    return;
-                                }
-
-                                const portableId = crypto.randomUUID();
-
-                                await runtime.db.notes.put({
-                                    portable_id: portableId,
-                                    user_id: runtime.userId,
-                                    folder_portable_id: null,
-                                    title: parsed.title,
-                                    content: parsed.content,
-                                    version: 0,
-                                    deleted_at: null,
-                                    created_at: nowIso(),
-                                    updated_at: nowIso(),
-                                    attachments: [],
-                                    sync_state: "pending",
-                                    last_synced_at: null,
-                                });
-
-                                await queueOutbox(runtime.db, runtime.userId, {
-                                    entity_type: "note",
-                                    entity_portable_id: portableId,
-                                    action: "created",
-                                    payload: { title: parsed.title, content: parsed.content, folder_portable_id: null },
-                                    base_version: 0,
-                                });
-
-                                area.value = "";
-                                uiState.selectedNoteId = portableId;
-                                renderAll();
-                                syncNow();
-                            },
-                        }),
-                    ]),
-                    el("input", {
-                        id: "note-search",
-                        type: "search",
-                        class: "w-full rounded-lg border px-3 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                        placeholder: "Search notes…",
-                        value: uiState.search,
-                    }),
-                    el("div", { class: "flex items-center gap-2" }, [
-                        el("label", { class: "text-sm text-zinc-500", text: "Sort" }),
-                        el("select", {
-                            id: "note-sort",
-                            class: "rounded-lg border px-2 py-1 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                        }, [
-                            el("option", { value: "newest", text: "Newest" }),
-                            el("option", { value: "oldest", text: "Oldest" }),
-                            el("option", { value: "title_az", text: "Title A to Z" }),
-                            el("option", { value: "title_za", text: "Title Z to A" }),
-                        ]),
-                    ]),
-                    el("nav", { id: "folder-list", class: "space-y-1" }),
-                ]),
-                el("section", { class: "grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]" }, [
-                    el("div", { id: "note-list", class: "space-y-2 lg:max-h-[70vh] lg:overflow-auto" }),
-                    el("div", { id: "editor-panel" }),
-                ]),
-            ]),
-        ]),
-    );
-
-    const search = document.getElementById("note-search");
-    search.addEventListener("input", () => {
-        uiState.search = search.value;
-        renderList();
-    });
-
-    const sort = document.getElementById("note-sort");
-    sort.value = uiState.sort;
-    sort.addEventListener("change", () => {
-        uiState.sort = sort.value;
-        renderList();
-    });
-
-    renderFolders(folders);
-    renderList();
-    renderEditor();
-    renderStatus();
+    await renderFolders(folders);
+    await renderList();
+    await renderEditor();
+    await renderStatus();
 }
 
 function renderSignIn() {
@@ -1469,16 +1706,25 @@ function renderSignIn() {
         : "Your local notes are still here. Sign in again to sync.";
 
     root.replaceChildren(
-        el("div", { class: "mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center" }, [
+        el("a", {
+            href: "#main-content",
+            class: "fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0 dark:bg-white dark:text-black",
+            text: "Skip to content",
+        }),
+        el("main", {
+            id: "main-content",
+            tabindex: "-1",
+            class: "mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center",
+        }, [
             el("h1", { class: "text-2xl font-bold", text: "Notes" }),
             el("p", { class: "text-sm text-zinc-500", text: summary }),
             el("a", {
-                href: "/login",
-                class: "rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
+                href: "/login?redirect=/app",
+                class: "inline-flex min-h-11 items-center rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
                 text: "Sign in",
             }),
             el("div", { id: "status-bar", class: "flex flex-wrap items-center justify-center gap-3 text-sm" }),
-            el("div", { id: "status-notices", class: "flex flex-col gap-2" }),
+            el("div", { id: "status-notices", class: "flex flex-col gap-2", role: "status", "aria-live": "polite" }),
         ]),
     );
 
@@ -1495,10 +1741,10 @@ function renderUpdateBanner() {
     banner.classList.remove("hidden");
     banner.replaceChildren(
         el("div", { class: "flex items-center justify-between gap-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-900 dark:bg-blue-950 dark:text-blue-100" }, [
-            el("span", { text: "A new version is available." }),
+            el("span", { role: "status", text: "A new version is available." }),
             el("button", {
                 type: "button",
-                class: "font-semibold underline",
+                class: "min-h-11 font-semibold underline",
                 text: "Update now",
                 onclick: () => {
                     navigator.serviceWorker?.getRegistration().then((reg) => reg?.waiting?.postMessage("SKIP_WAITING"));
@@ -1598,6 +1844,38 @@ async function boot() {
 
     window.addEventListener("offline", () => {
         setRuntime({ online: false });
+    });
+
+    window.addEventListener("keydown", (event) => {
+        if (
+            event.key.toLowerCase() !== "n"
+            || ! event.altKey
+            || ! event.shiftKey
+            || event.ctrlKey
+            || event.metaKey
+            || event.repeat
+        ) {
+            return;
+        }
+
+        if (! (event.target instanceof Element)) {
+            return;
+        }
+
+        if (event.target.closest("input, textarea, select, [contenteditable]")) {
+            return;
+        }
+
+        if (document.querySelector("dialog[open]")) {
+            return;
+        }
+
+        const capture = document.getElementById("capture-text");
+
+        if (capture) {
+            event.preventDefault();
+            capture.focus();
+        }
     });
 }
 

@@ -4,6 +4,11 @@
         @include('partials.head')
     </head>
     <body class="min-h-screen bg-white dark:bg-zinc-800">
+        <a href="#main-content"
+            class="fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0 focus:outline-3 focus:outline-offset-2 focus:outline-white">
+            {{ __('Skip to content') }}
+        </a>
+
         <flux:sidebar sticky :collapsible="true" class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
             <flux:sidebar.header>
                 <x-app-logo :sidebar="true" href="{{ route('notes.index') }}" wire:navigate />

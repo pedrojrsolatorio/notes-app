@@ -45,7 +45,13 @@ class FortifyServiceProvider extends ServiceProvider
      */
     private function configureViews(): void
     {
-        Fortify::loginView(fn () => view('pages::auth.login'));
+        Fortify::loginView(function (Request $request) {
+            if ($request->query('redirect') === '/app') {
+                $request->session()->put('url.intended', route('pwa.notes'));
+            }
+
+            return view('pages::auth.login');
+        });
         Fortify::verifyEmailView(fn () => view('pages::auth.verify-email'));
         Fortify::twoFactorChallengeView(fn () => view('pages::auth.two-factor-challenge'));
         Fortify::confirmPasswordView(fn () => view('pages::auth.confirm-password'));

@@ -42,6 +42,8 @@ test('[AC-10] renders the shortcut hints', function () {
         ->assertSee('Cmd')
         ->assertSee('Enter')
         ->assertSee('to save')
+        ->assertSee('Alt')
+        ->assertSee('Shift')
         ->assertSee('to open');
 });
 

@@ -20,7 +20,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 7 | Note import and export | Slice 3 | in-progress |
 | 8 | Offline use and device sync | Slice 4 | in-progress |
 | 9 | Note reminders | Slice 5 | in-progress |
-| 10 | Accessibility and responsive use | Slice 6 | planned |
+| 10 | Accessibility and responsive use | Slice 6 | in-progress |
 | 11 | Performance as notes grow | Slice 7 | planned |
 
 ## Existing
@@ -113,10 +113,18 @@ Help you return to a note at a time you choose.
 spec [0005](../specs/0005-note-reminders.md)
 Code in `app/Console/Commands/DispatchDueNoteReminders.php`, `app/Jobs/SendNoteReminder.php`, `app/Mail/NoteReminderMail.php`, `resources/views/components/notes/⚡index.blade.php`, `resources/js/note-reminder-time.js`, and `tests/Feature/NoteReminderTest.php`.
 
-### 10. Accessibility and responsive use · planned
+### 10. Accessibility and responsive use · in-progress
 Make common note tasks comfortable with keyboard, assistive technology, and narrow or wide screens.
 **Done when:** you can complete common note tasks by keyboard and touch, with clear labels and feedback across screen sizes.
+- [x] Design it (spec): `/architect accessibility and responsive use`
 - [ ] Build it: `/develop accessibility and responsive use`
+  - [ ] Add the shared landmark, skip link, focus style, reduced motion, and dark theme plus forced colors baseline, and label fields, folder actions, and the editor toolbar with the More menu (AC-2, AC-3, AC-4, AC-11, AC-12)
+  - [ ] Make the note list keyboard operable, add stable focus keys and focus restoration, and change the quick capture shortcut (AC-1, AC-8, AC-13)
+  - [ ] Add the `/notes` status and validation behavior, the responsive three column and list or editor views, and the table width menu (AC-5, AC-6, AC-7, AC-9, AC-10, AC-14, AC-19)
+  - [ ] Add the offline semantics, full sync status, responsive layout, keyboard operation, focus moves, touch targets, sign in return path, and cold offline asset support (AC-15, AC-17)
+  - [ ] Add Pest DOM checks and run the existing notes, capture, reminder, attachment, and sync regression tests (AC-16, AC-18)
+- [ ] Verify it: `/check verify accessibility and responsive use`
+spec [0006](../specs/0006-accessibility-and-responsive-use/index.md)
 
 ### 11. Performance as notes grow · planned · needs a decision
 Keep browsing and searching comfortable as your collection becomes larger.
@@ -128,6 +136,9 @@ Keep browsing and searching comfortable as your collection becomes larger.
 - Shared notes, collaboration, and public publishing are outside the private solo use planned here.
 - Product analytics, paid plans, and multiple language support are not needed for the current personal use goal.
 - Global quick capture from the dashboard and profile is a later extension of Quick capture, after the notes page version is verified.
+- A light theme with verified WCAG 2.2 AA contrast is a follow-up from Accessibility and responsive use (spec 0006).
+- A formatting toolbar in the offline editor is a later extension of Offline use and device sync (spec 0006).
+- A repeatable browser accessibility check in CI waits for an approved test dependency (spec 0006).
 
 ## Legend
 
