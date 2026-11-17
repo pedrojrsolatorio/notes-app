@@ -1,7 +1,7 @@
 # 0006. Accessibility and responsive use
 
 **Date**: 2026-11-15
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 

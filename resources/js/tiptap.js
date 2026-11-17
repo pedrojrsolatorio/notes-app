@@ -491,24 +491,38 @@ export function createTiptapComponent(content = "", options = {}) {
                         : baseWidth
                 ));
 
+            const rows = [];
+
+            table.descendants((node, pos) => {
+                if (node.type.name === "tableRow") {
+                    rows.push({ cells: [] });
+
+                    return true;
+                }
+
+                if (node.type.name === "tableCell" || node.type.name === "tableHeader") {
+                    rows.at(-1)?.cells.push({ node, pos });
+                }
+
+                return false;
+            });
+
             let transaction = editor.state.tr;
 
-            table.forEach((row, rowOffset) => {
-                const rowPos = info.pos + 1 + rowOffset;
+            for (const row of rows) {
                 let column = 0;
 
-                row.forEach((cell, cellOffset) => {
-                    const cellPos = rowPos + 1 + cellOffset;
-                    const colspan = cell.attrs.colspan ?? 1;
+                for (const cell of row.cells) {
+                    const colspan = cell.node.attrs.colspan ?? 1;
 
-                    transaction = transaction.setNodeMarkup(cellPos, undefined, {
-                        ...cell.attrs,
+                    transaction = transaction.setNodeMarkup(info.pos + 1 + cell.pos, undefined, {
+                        ...cell.node.attrs,
                         colwidth: widths === null ? null : widths.slice(column, column + colspan),
                     });
 
                     column += colspan;
-                });
-            });
+                }
+            }
 
             editor.view.dispatch(transaction);
             editor.commands.focus();

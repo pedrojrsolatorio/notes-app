@@ -109,3 +109,14 @@ Run this on a machine with PHP 8.3, Node 22, and the browsers and assistive tech
 11. **Final suite and style**
     - Run `php artisan test --compact` and confirm the full suite passes.
     - Run `vendor/bin/pint --dirty --format agent` on any touched PHP files.
+
+## Results (2026-11-17)
+
+- Implemented across `/notes`, `/app`, the shared layout, Tiptap, the service worker, and the Fortify login return path.
+- Static checks passed: Blade compilation for the touched views, `node --check` for the touched JavaScript, and `php -l` for `FortifyServiceProvider.php`.
+- Added `tests/Feature/AccessibilityTest.php` for the Livewire DOM contract and updated the shortcut and attachment-error assertions in the existing tests.
+- Automated checks from a container copy of the app (outside the slow WSL mount): focused `AccessibilityTest`, `QuickCaptureTest`, and `NotesTest` pass 71 tests / 298 assertions after fixing the shared `noteListQuery()` return type.
+- Full suite: 177 passed / 735 assertions. The only 13 failures are pre-existing backup tests that need `ext-zip`, which is absent from the bare PHP container; the zip extension could not be installed because the sandbox has no apt network access.
+- `vendor/bin/pint --format agent` passes on the touched PHP files. `phpstan analyse` reports 56 errors, all in pre-existing offline sync/backup files, not in the touched accessibility files.
+- Static checks passed: Blade compilation for the touched views, `node --check` for the touched JavaScript, and `php -l` for `FortifyServiceProvider.php`.
+- Not run: `npm run build` and the manual browser and assistive technology matrix. The local npm `vp` symlink is broken. These checks remain required on the dev machine before the feature can move to done.

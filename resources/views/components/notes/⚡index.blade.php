@@ -707,7 +707,7 @@ new class extends Component
      */
     private function noteListQuery(User $user): \Illuminate\Database\Eloquent\Builder
     {
-        $notesQuery = $user->notes();
+        $notesQuery = $user->notes()->getQuery();
 
         if ($this->isTrashView) {
             $notesQuery->onlyTrashed();

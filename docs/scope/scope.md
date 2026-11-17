@@ -117,12 +117,12 @@ Code in `app/Console/Commands/DispatchDueNoteReminders.php`, `app/Jobs/SendNoteR
 Make common note tasks comfortable with keyboard, assistive technology, and narrow or wide screens.
 **Done when:** you can complete common note tasks by keyboard and touch, with clear labels and feedback across screen sizes.
 - [x] Design it (spec): `/architect accessibility and responsive use`
-- [ ] Build it: `/develop accessibility and responsive use`
-  - [ ] Add the shared landmark, skip link, focus style, reduced motion, and dark theme plus forced colors baseline, and label fields, folder actions, and the editor toolbar with the More menu (AC-2, AC-3, AC-4, AC-11, AC-12)
-  - [ ] Make the note list keyboard operable, add stable focus keys and focus restoration, and change the quick capture shortcut (AC-1, AC-8, AC-13)
-  - [ ] Add the `/notes` status and validation behavior, the responsive three column and list or editor views, and the table width menu (AC-5, AC-6, AC-7, AC-9, AC-10, AC-14, AC-19)
-  - [ ] Add the offline semantics, full sync status, responsive layout, keyboard operation, focus moves, touch targets, sign in return path, and cold offline asset support (AC-15, AC-17)
-  - [ ] Add Pest DOM checks and run the existing notes, capture, reminder, attachment, and sync regression tests (AC-16, AC-18)
+- [x] Build it: `/develop accessibility and responsive use`
+  - [x] Add the shared landmark, skip link, focus style, reduced motion, and dark theme plus forced colors baseline, and label fields, folder actions, and the editor toolbar with the More menu (AC-2, AC-3, AC-4, AC-11, AC-12)
+  - [x] Make the note list keyboard operable, add stable focus keys and focus restoration, and change the quick capture shortcut (AC-1, AC-8, AC-13)
+  - [x] Add the `/notes` status and validation behavior, the responsive three column and list or editor views, and the table width menu (AC-5, AC-6, AC-7, AC-9, AC-10, AC-14, AC-19)
+  - [x] Add the offline semantics, full sync status, responsive layout, keyboard operation, focus moves, touch targets, sign in return path, and cold offline asset support (AC-15, AC-17)
+  - [x] Add Pest DOM checks and run the existing notes, capture, reminder, attachment, and sync regression tests (AC-16, AC-18)
 - [ ] Verify it: `/check verify accessibility and responsive use`
 spec [0006](../specs/0006-accessibility-and-responsive-use/index.md)
 
