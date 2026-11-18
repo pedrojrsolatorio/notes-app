@@ -237,6 +237,7 @@ Project-specific rules for this repo. The Boost guidelines above are framework-m
 - `notes.version` and `folders.version` are the conflict bases. The client sends portable ids only, never server integer ids. A stale note content change creates a normal note titled `Conflict copy of <title>` in All Notes; a folder delete wins and moves its notes to All Notes.
 - The `/app` shell is public and probes the session. `/sync` stays behind `auth`+`verified` with session CSRF and is rate limited to 60 requests per minute. Every sync query is scoped to `auth()->user()`.
 - The Dexie database is per user (`notes-offline-{userId}`), and every local query filters by `user_id`. The service worker caches only the `/app` shell and never `/sync` or `/note-attachments/`. Attachments stay online only; sync sends a manifest without file bytes.
+- The service worker must precache `/build/` assets from both absolute and relative Vite URLs so a cold `/app` reload works after a build.
 - Reminder fields are server only and must stay out of offline sync and backup data. Reminder-only updates use direct database writes so they do not change note timestamps or versions or create `sync_changes` rows.
 
 ## Storage & Uploads

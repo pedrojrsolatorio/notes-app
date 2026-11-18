@@ -29,7 +29,10 @@ async function precacheShell() {
         headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     }));
 
-    const assets = [...html.matchAll(/(?:src|href)="(\/build\/[^"]+)"/g)].map((match) => match[1]);
+    const assets = [...html.matchAll(/(?:src|href)="([^"]+)"/g)]
+        .map((match) => new URL(match[1], self.location.origin))
+        .filter((url) => url.origin === self.location.origin && url.pathname.startsWith('/build/'))
+        .map((url) => url.pathname);
 
     await Promise.all(assets.map((asset) => cache.add(asset).catch(() => {})));
 }
