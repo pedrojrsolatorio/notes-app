@@ -21,7 +21,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 8 | Offline use and device sync | Slice 4 | in-progress |
 | 9 | Note reminders | Slice 5 | in-progress |
 | 10 | Accessibility and responsive use | Slice 6 | in-progress |
-| 11 | Performance as notes grow | Slice 7 | planned |
+| 11 | Performance as notes grow | Slice 7 | in-progress |
 
 ## Existing
 
@@ -126,10 +126,18 @@ Make common note tasks comfortable with keyboard, assistive technology, and narr
 - [ ] Verify it: `/check verify accessibility and responsive use`
 spec [0006](../specs/0006-accessibility-and-responsive-use/index.md)
 
-### 11. Performance as notes grow · planned · needs a decision
+### 11. Performance as notes grow · in-progress
 Keep browsing and searching comfortable as your collection becomes larger.
 **Done when:** note browsing and search meet an agreed response target with a realistic collection size.
-- [ ] Design it (spec): `/architect performance as notes grow`
+- [x] Design it (spec): `/architect performance as notes grow`
+- [ ] Build it: `/develop performance as notes grow`
+  - [ ] Add the title key, indexes, backfill, and sync payload (AC-3, AC-7, AC-11)
+  - [ ] Add the paged server read, cursor validation, Load more, and preview bounds (AC-1, AC-2, AC-4, AC-8, AC-9, AC-10)
+  - [ ] Add search, folder, Trash, sort, and focus behavior (AC-2, AC-3, AC-4, AC-5, AC-8)
+  - [ ] Add offline paging and the benchmark checks (AC-6, AC-10, AC-12)
+  - [ ] Run the focused and full regression suites (AC-11)
+- [ ] Verify it: `/check verify performance as notes grow`
+spec [0007](../specs/0007-performance-as-notes-grow/index.md)
 
 ## Deferred
 
@@ -139,6 +147,9 @@ Keep browsing and searching comfortable as your collection becomes larger.
 - A light theme with verified WCAG 2.2 AA contrast is a follow-up from Accessibility and responsive use (spec 0006).
 - A formatting toolbar in the offline editor is a later extension of Offline use and device sync (spec 0006).
 - A repeatable browser accessibility check in CI waits for an approved test dependency (spec 0006).
+- SQLite full text search for notes if the benchmark shows search is the bottleneck (from spec 0007).
+- Snapshot tokens for concurrent edits to active sort keys if page reordering remains noticeable (from spec 0007).
+- A repeatable browser timing check in CI when approved browser tooling is available (from spec 0007).
 
 ## Legend
 
