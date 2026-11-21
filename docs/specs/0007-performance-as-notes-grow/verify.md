@@ -82,3 +82,25 @@ Run this on a machine with PHP 8.3, Node 22, SQLite, and a browser for the `/not
 ## Results
 
 Pending.
+
+## Current implementation check
+
+The current benchmark is `php artisan test --compact --group=performance tests/Feature/NotesListPerformanceTest.php`. It supersedes the earlier sample command and path above. The explicit server run and the browser run both used 10,000 notes, 100 samples per path, and the 500 ms p95 target.
+
+Recorded server p95 results were 7.83 ms for first page, 9.92 ms for newest Load more, 12.13 ms for search, 10.43 ms for folder, 10.29 ms for Trash, 9.06 ms for title A to Z, 8.80 ms for title Z to A, and 12.18 ms for the final page count.
+
+Recorded browser p95 results were 28.6 ms for first page, 14.8 ms for Load more, 297.7 ms for search including the 200 ms debounce, 28.4 ms for folder, 28.1 ms for Trash, 11.5 ms for title A to Z, and 29.1 ms for title Z to A.
+
+## Additional value source checks
+
+1. [ ] Switch accounts and confirm the server list uses `auth()->user()` and the local database uses the current user id. Confirm neither list can show another user's notes (AC-8).
+2. [ ] Commit different search text on `/notes` and `/app`. Confirm each read uses the current search input and that typing before the debounce commits does not move focus (AC-2, AC-5).
+3. [ ] Sort newest, oldest, title A to Z, and title Z to A with tied timestamps and duplicate titles. Confirm the ordering uses the active sort and the specified `updated_at` or `title_key` value with its id tie breaker. Include mixed case, Unicode, and surrounding whitespace (AC-3).
+4. [ ] Change folders and switch to Trash. Confirm each read uses the selected folder or current view and resets paging to its first page (AC-2, AC-5).
+5. [ ] Insert and delete notes between pages. Confirm the versioned cursor uses the active sort, filter, key, and anchor without skipping or repeating eligible notes (AC-2).
+6. [ ] Try cursors with a wrong version, sort, filter, missing anchor, and foreign anchor. Confirm the server maps anchors with an owner-scoped lookup, restarts at the first page, and shows only fixed status text. Confirm titles, content, keys, and cursors do not appear in logs or status text (AC-8).
+7. [ ] Load a note with content longer than 2,000 characters. Confirm the server preview source is limited to 2,000 raw characters and both previews apply the existing tag stripping and 120-character display limit (AC-9).
+8. [ ] Click Load more. Confirm 50 new rows append, existing rows remain, the count is announced once, and focus stays on the button. Simulate a failed load and confirm rows and cursor remain unchanged, the failure is announced once, and retry works. At the end, confirm the control disappears, the filtered total is counted, and focus moves to the heading (AC-4).
+9. [ ] Confirm status text contains only fixed strings with counts and that each load or sync refresh changes the status message id once. Advance the offline sync revision while on a later page and confirm the list resets and announces once (AC-4, AC-6, AC-8).
+10. [ ] Apply the migration to representative data. Confirm the nullable 510-character key, four read indexes, deterministic 500-row backfill, and absence of new tables or uniqueness rules (AC-7).
+11. [ ] Run focused and full regression suites. Confirm reminder fields remain outside offline sync and local note records (AC-11).

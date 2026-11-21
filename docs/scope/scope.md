@@ -130,14 +130,15 @@ spec [0006](../specs/0006-accessibility-and-responsive-use/index.md)
 Keep browsing and searching comfortable as your collection becomes larger.
 **Done when:** note browsing and search meet an agreed response target with a realistic collection size.
 - [x] Design it (spec): `/architect performance as notes grow`
-- [ ] Build it: `/develop performance as notes grow`
-  - [ ] Add the title key, indexes, backfill, and sync payload (AC-3, AC-7, AC-11)
-  - [ ] Add the paged server read, cursor validation, Load more, and preview bounds (AC-1, AC-2, AC-4, AC-8, AC-9, AC-10)
-  - [ ] Add search, folder, Trash, sort, and focus behavior (AC-2, AC-3, AC-4, AC-5, AC-8)
-  - [ ] Add offline paging and the benchmark checks (AC-6, AC-10, AC-12)
-  - [ ] Run the focused and full regression suites (AC-11)
+- [x] Build it: `/develop performance as notes grow`
+  - [x] Add the title key, indexes, backfill, and sync payload (AC-3, AC-7, AC-11)
+  - [x] Add the paged server read, cursor validation, Load more, and preview bounds (AC-1, AC-2, AC-4, AC-8, AC-9, AC-10)
+  - [x] Add search, folder, Trash, sort, and focus behavior (AC-2, AC-3, AC-4, AC-5, AC-8)
+  - [x] Add offline paging and the benchmark checks (AC-6, AC-10, AC-12)
+  - [x] Run the focused and full regression suites (AC-11)
 - [ ] Verify it: `/check verify performance as notes grow`
 spec [0007](../specs/0007-performance-as-notes-grow/index.md)
+Code in `database/migrations/2026_11_21_143804_add_title_key_and_read_indexes_to_notes_table.php`, `app/Models/Note.php`, `app/Http/Controllers/SyncController.php`, `resources/views/components/notes/⚡index.blade.php`, `resources/js/offline-app.js`, and `tests/Feature/NotesListPerformanceTest.php`.
 
 ## Deferred
 

@@ -123,6 +123,32 @@ test('[AC-2] creates a note through the sync write path', function () {
         ->and(SyncChange::where('user_id', $user->id)->where('entity_portable_id', $noteId)->exists())->toBeTrue();
 });
 
+test('[AC-7, AC-11] derives title keys from sync titles and ignores client supplied keys', function () {
+    $user = User::factory()->create();
+    $noteId = (string) Str::uuid();
+
+    $response = $this->actingAs($user)
+        ->post(route('sync.store'), [
+            'changes' => [[
+                'client_change_id' => (string) Str::uuid(),
+                'entity_type' => 'note',
+                'action' => 'created',
+                'portable_id' => $noteId,
+                'base_version' => 0,
+                'payload' => [
+                    'title' => " \u{2003}CAFÉ\u{0085}",
+                    'title_key' => 'forged-key',
+                    'content' => '',
+                    'folder_portable_id' => null,
+                ],
+            ]],
+        ], ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest']);
+
+    $response->assertOk()->assertJsonPath('notes.0.title_key', 'café');
+
+    expect(Note::where('portable_id', $noteId)->value('title_key'))->toBe('café');
+});
+
 test('[AC-10] applies the same change only once', function () {
     $user = User::factory()->create();
     $clientChangeId = (string) Str::uuid();

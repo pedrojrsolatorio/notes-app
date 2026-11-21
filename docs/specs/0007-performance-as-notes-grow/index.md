@@ -1,7 +1,7 @@
 # 0007. Performance as notes grow
 
 **Date**: 2026-11-19
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 
@@ -17,9 +17,9 @@ This decision keeps the notes list comfortable at 10,000 notes by paging the lis
 
 **Acceptance criteria** (the contract, each criterion is IDed and independently checkable):
 
-1. **AC-1**: With 10,000 notes for one user in SQLite, the measured `/notes` paths, first page, newest Load more, search, folder, Trash, and title sort, each return 50 rows at a time and stay under 500 ms at the 95th percentile, measured by a seeded benchmark after a warm up. The end of list count read is included in the measured path.
+1. **AC-1**: With 10,000 notes for one user in SQLite, the measured `/notes` paths, first page, newest Load more, search, folder, Trash, title A to Z, and title Z to A, each return 50 rows at a time and stay under 500 ms at the 95th percentile, measured by a seeded benchmark after a warm up. The end of list count read is included in the measured path.
 2. **AC-2**: Search, All Notes, folder views, and Trash use the same paged read on `/notes` and the same paged local read in `/app`. A page boundary is a versioned base64url value naming sort, filter, sort key, and anchor. The server anchor is the note public id, mapped once to the owner scoped note row, and the local anchor is the Dexie portable id. It is never an offset, so inserts and deletes between loads do not cause duplicate or missing rows.
-3. **AC-3**: Newest, oldest, and title sorts remain available. Newest orders by `updated_at desc, id desc`. Oldest orders by `updated_at asc, id asc`. Title orders by `title_key asc, id asc`. `title_key` is derived from `title` with the same algorithm as folder `name_key`: trim Unicode whitespace and Unicode line and tab characters at both ends, then lowercase as UTF-8. It is stored as 510 characters for normalization headroom, while `title` validation stays at 255 characters.
+3. **AC-3**: Newest, oldest, title A to Z, and title Z to A sorts remain available. Newest orders by `updated_at desc, id desc`. Oldest orders by `updated_at asc, id asc`. Title A to Z orders by `title_key asc, id asc`. Title Z to A orders by `title_key desc, id desc`. `title_key` is derived from `title` with the same algorithm as folder `name_key`: trim Unicode whitespace and Unicode line and tab characters at both ends, then lowercase as UTF-8. It is stored as 510 characters for normalization headroom, while `title` validation stays at 255 characters.
 4. **AC-4**: Load more appends the next 50 rows, keeps existing rows, moves the cursor, and announces the newly loaded row count once through the existing status region. Focus stays on Load more. When no rows remain, the control disappears, focus moves to the list heading, and the total matched count is announced once from a count on the same owner scoped and filtered query. A failed load keeps rows and the cursor unchanged, announces the failure once, and allows retry.
 5. **AC-5**: An explicit sort or filter commit resets to the first page, clears the old cursor, and moves focus to the list heading. Live debounced search input does not move focus. When the selected note no longer exists in the full current filter, confirmed by an owner scoped existence check, the editor clears and focus moves to the list heading.
 6. **AC-6**: `/app` uses the same 50 row page, the same opaque cursor rule, keeps old rows while loading, and reuses the current empty and error messages. A sync completion that advances the local revision resets the local list to the first page once per sync run, using the revision as the dedupe key, and announces the refresh once.
@@ -28,7 +28,7 @@ This decision keeps the notes list comfortable at 10,000 notes by paging the lis
 9. **AC-9**: List rows read only the first 2,000 raw characters of `content` into PHP as a preview source, then reuse the current tag stripping and 120 character display limit. This bounds data transferred to the application. SQLite may still read the content column when a search scans note bodies.
 10. **AC-10**: The 500 ms target is recorded in the spec and benchmark test with no new environment setting. The benchmark seeds 10,000 notes, warms up, then takes 100 timed reads per measured path. The 95th percentile uses nearest rank and misses fail verification. The benchmark uses a PHPUnit group excluded from CI timing, while CI runs query count and shape checks. The dev machine runs the benchmark explicitly.
 11. **AC-11**: Existing note, folder, search, sort, trash, quick capture, reminder, attachment, backup, and sync behavior still passes its focused and full regression tests. Reminder fields stay out of the offline sync payload.
-12. **AC-12**: With 10,000 local notes in Dexie, the measured `/app` paths, first page, newest Load more, search, folder, Trash, and title sort, stay under 500 ms at the 95th percentile in a browser timing check on the dev machine after a warm up. CI checks local index shape instead of wall clock time.
+12. **AC-12**: With 10,000 local notes in Dexie, the measured `/app` paths, first page, newest Load more, search, folder, Trash, title A to Z, and title Z to A, stay under 500 ms at the 95th percentile in a browser timing check on the dev machine after a warm up. CI checks local index shape instead of wall clock time.
 
 ## Decision
 
@@ -66,9 +66,10 @@ Local Dexie indexes on the `notes` table:
 Cursor contract:
 
 1. The wire value is versioned base64url JSON with `v`, `sort`, `filter`, `key`, and `anchor`.
-2. `sort` is `newest`, `oldest`, or `title`. `filter` names search text, folder or All Notes, and Trash state. `key` is the sort value at the last row, with `updated_at` represented as UTC ISO 8601 with microseconds. `anchor` is the note public id.
-3. On the server, the anchor is mapped once through the owner scoped filtered query to the note id used by the database indexes. In Dexie, the anchor is the portable id used directly by the local indexes.
-4. A cursor is accepted only when its version, sort, and filter match current state and the anchor exists in the owner scoped filtered query. Otherwise the read restarts at first page with a status message.
+2. `sort` is `newest`, `oldest`, `title_asc`, or `title_desc`, matching the existing `sortBy` values. `filter` names search text, folder or All Notes, and Trash state. `key` is the sort value at the last row, with `updated_at` represented as UTC ISO 8601 with microseconds and `title_key` represented as stored. `anchor` is the note public id.
+3. Each next page compares the pair made from `key` and the anchor row's stable id in the active ordering direction. The server uses the mapped `notes.id`; Dexie uses `portable_id`. Newest and title Z to A use descending comparisons; oldest and title A to Z use ascending comparisons. This keeps title direction in the cursor and avoids offsets.
+4. On the server, the anchor is mapped once through the owner scoped filtered query to the note id used by the database indexes. In Dexie, the anchor is the portable id used directly by the local indexes.
+5. A cursor is accepted only when its version, sort, and filter match current state and the anchor exists in the owner scoped filtered query. Otherwise the read restarts at first page with a status message.
 
 **State transitions**:
 
@@ -93,10 +94,10 @@ Cursor contract:
 |---|---|---|
 | Initial or paged list read | Owner scope | `auth()->user()` on the server, current user id in Dexie |
 | Initial or paged list read | Search text | Existing committed search input state on each surface |
-| Initial or paged list read | Sort | Existing `sortBy` state on each surface, limited to newest, oldest, and title |
+| Initial or paged list read | Sort | Existing `sortBy` state on each surface, limited to newest, oldest, title A to Z, and title Z to A |
 | Initial or paged list read | Folder or trash filter | Existing selected folder and trash view state on each surface |
 | Initial or paged list read | Page cursor | Versioned base64url value derived from active sort, filter, sort key, and public note anchor |
-| Initial or paged list read | Sort key and anchor | `updated_at` plus public id for newest and oldest, `title_key` plus public id for title |
+| Initial or paged list read | Sort key and anchor | `updated_at` plus public id for newest and oldest, `title_key` plus public id for either title direction |
 | Initial or paged list read | Server keyset id | One owner scoped lookup from the public anchor to `notes.id` |
 | Initial or paged list read | Preview source | SQL `substr(content, 1, 2000)` on the server, first 2,000 local characters in Dexie |
 | Initial or paged list read | Preview text | Existing decode, tag strip, and 120 character display rule applied to the preview source |
@@ -119,7 +120,7 @@ Cursor contract:
 2. Page size is 50 on both surfaces. End of list uses a 51 row read and never displays the extra row.
 3. A cursor is versioned, base64url encoded, plain validated state. It is never an offset and never trusted from the client.
 4. A cursor is accepted only when its sort and filter match current state and its anchor exists in the owner scoped filtered query.
-5. Ordering is explicit. Newest uses `updated_at desc, id desc`. Oldest uses `updated_at asc, id asc`. Title uses `title_key asc, id asc`.
+5. Ordering is explicit. Newest uses `updated_at desc, id desc`. Oldest uses `updated_at asc, id asc`. Title A to Z uses `title_key asc, id asc`. Title Z to A uses `title_key desc, id desc`.
 6. `title_key` follows `title` on every server write path, including sync apply, backup restore, quick capture, and direct note edits. Client supplied `title_key` is ignored.
 7. During backfill, rows with null `title_key` fall back to `LOWER(title)` for title sort. After backfill, every valid note has a title key.
 8. Edits to a mutable sort key can reposition a row. A client resets paging when a sync revision advances or a local edit changes a sort key. The stable paging guarantee covers inserts and deletes between loads.
@@ -141,7 +142,7 @@ Cursor contract:
 
 1. Happy path: a user with 10,000 notes loads `/notes`, waits for the measured read, clicks Load more, and receives 50 new rows with focus still on the button, verifies **AC-1**, **AC-4**, **AC-10**.
 2. Stable paging case: a note is inserted and a note is deleted while a page boundary is held, then the next page loads without a duplicate or missing eligible row, verifies **AC-2**.
-3. Sort case: newest, oldest, and title each page through a mixed set with shared timestamps and duplicated titles, verifies **AC-2**, **AC-3**.
+3. Sort case: newest, oldest, title A to Z, and title Z to A each page through a mixed set with shared timestamps and duplicated titles, verifies **AC-2**, **AC-3**.
 4. Filter case: search commit, folder, and Trash each use the same cursor contract and reset on explicit filter change, verifies **AC-2**, **AC-5**.
 5. Debounce case: typing in search does not move focus or announce a reset until the search is committed, verifies **AC-5**.
 6. Selection case: the selected note is removed from the full current filter by search or folder change, and the editor clears with focus on the list heading, verifies **AC-5**.
@@ -159,7 +160,7 @@ Cursor contract:
 
 1. Add the target migration and write paths: nullable `notes.title_key`, the four read indexes, title normalization with the folder name key algorithm, deterministic 500 row chunk backfill, and server derived `title_key` in the sync note payload; ignore client supplied values and fall back to local derivation when an older server omits the field; cover server writes and old row backfill, satisfies **AC-3**, **AC-7**, **AC-11**.
 2. Add the shared server paged read for `/notes` with owner scoping, 50 displayed rows from a 51 row read, bounded preview source, versioned validated cursor, public id to internal id mapping, explicit ordering, and newest sort as the first thin end to end thread; wire the Load more action, status message ids, and focus behavior, satisfies **AC-1**, **AC-4**, **AC-8**, **AC-9**, **AC-10**.
-3. Extend the server paged read to search commits, folder, Trash, oldest, and title sorts with stable tie breaks, existence checked selection clearing, end of list count, explicit focus behavior, and empty and error reuse, satisfies **AC-2**, **AC-3**, **AC-4**, **AC-5**, **AC-8**.
+3. Extend the server paged read to search commits, folder, Trash, oldest, and both title sort directions with stable tie breaks, existence checked selection clearing, end of list count, explicit focus behavior, and empty and error reuse, satisfies **AC-2**, **AC-3**, **AC-4**, **AC-5**, **AC-8**.
 4. Add matching Dexie indexes and local paged reads in `offline-app.js` with the same cursor format, 50 row page, retained rows, status message ids, sync revision reset, and old server fallback, satisfies **AC-2**, **AC-6**, **AC-8**, **AC-12**.
 5. Add the seeded benchmark group with 10,000 notes, 100 timed reads after a warm up, nearest rank 95th percentile gates for `/notes` and `/app`, end of list count included, query count guards in the default CI suite, and the timing group excluded from CI, satisfies **AC-1**, **AC-10**, **AC-12**.
 6. Run focused notes, sync, backup, reminder, quick capture, and attachment tests, then the full suite and Pint, satisfies **AC-11**.

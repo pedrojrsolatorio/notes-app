@@ -6,6 +6,8 @@ The notes app currently loads the full note list on both surfaces. On `/notes`, 
 
 The agreed target is 10,000 notes, with a 95th percentile read under 500 ms on both `/notes` and `/app`. Sync and backup throughput are explicitly outside this slice. The work must fit the existing Laravel 13, Livewire 4, Flux 2, SQLite, Tiptap, and Dexie stack, preserve owner scoped reads, and add no new dependency. It must also preserve the current search, sort, folder, Trash, empty, error, and status behavior from the earlier features.
 
+The current list offers both title A to Z and title Z to A. The cursor must carry the selected direction so later pages keep the same ordering.
+
 The main risk is not raw query time alone. Offset paging can duplicate or skip rows when notes change between loads. Mutable sort keys can reposition rows even with keyset paging. Loading full note bodies into PHP for a page can waste memory on long notes. A new search engine or preview table would add state to keep consistent with sync and backup, both of which are already sensitive areas. The chosen shape must therefore be small enough to verify and honest about the failure modes it does not solve.
 
 ## Options considered
@@ -21,6 +23,7 @@ Keep the existing tables, add a normalized note title key and four read indexes,
 3. It gives stable page boundaries for inserts and deletes.
 4. It fits a Tracer Bullet build, because the first page, cursor, and UI can be proven end to end before search, sorts, and offline are thickened.
 5. The benchmark can prove or reject the target without broad changes.
+6. It preserves both current title sort directions and carries the direction in each page cursor.
 
 **Cons**:
 
@@ -80,6 +83,8 @@ Create an expression index on `LOWER(title)` for title sort and keep the bounded
 ## Rationale
 
 The 10,000 note target and 500 ms read target are specific enough to measure, and the existing code gives a clear place to start. Option 1 is the smallest change that touches every layer without adding new infrastructure. It keeps the owner boundary intact, keeps backup and sync behavior stable apart from one additive field, and lets the benchmark decide whether search needs more work later.
+
+Both title directions remain available to avoid removing an existing sort choice. The cursor uses `title_asc` or `title_desc`, and continues with the matching direction for `title_key` and its stable ID tie breaker.
 
 Option 2 is the strongest future path if search misses the target, but it would add a new search structure and a second set of results to keep in step with note writes. Option 3 is easier to build but fails the chosen invariant around stable pages. Option 4 is materially simpler and was considered seriously, but `title_key` follows the existing folder `name_key` pattern with Unicode trim and UTF-8 lowercase rules, and it gives one explicit value that both surfaces can page by. The runner up is Option 4 for the title sort part, with Option 2 kept as the search follow up.
 

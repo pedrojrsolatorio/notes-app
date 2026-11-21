@@ -583,6 +583,172 @@ test('sorts notes alphabetically by title', function () {
         ->assertSeeInOrder(['Apple note', 'Zebra note']);
 });
 
+test('[AC-3] derives the normalized title key whenever a note title changes', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => " \u{2003}CAFÉ\u{0085}", 'content' => '']);
+
+    expect($note->title_key)->toBe('café');
+
+    $note->update(['title' => " \u{00A0}Résumé\t"]);
+
+    expect($note->fresh()->title_key)->toBe('résumé');
+});
+
+test('[AC-2, AC-3] pages duplicate titles in both directions with stable tie breakers', function () {
+    $user = User::factory()->create();
+    $timestamp = now()->subDay();
+    $notes = collect();
+
+    for ($index = 0; $index < 101; $index++) {
+        $note = $user->notes()->create(['title' => 'Same title', 'content' => '']);
+        $note->forceFill(['updated_at' => $timestamp])->saveQuietly();
+        $notes->push($note);
+    }
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->set('sortBy', 'title_asc')
+        ->assertSee('id="note-row-'.$notes->first()->id.'"', false)
+        ->assertDontSee('id="note-row-'.$notes->last()->id.'"', false)
+        ->assertSet('hasMoreNotes', true)
+        ->call('loadMoreNotes')
+        ->assertSet('hasMoreNotes', true)
+        ->assertDispatched('focus-target', fn (string $event, array $params): bool => $params['id'] === 'load-more-notes')
+        ->call('loadMoreNotes')
+        ->assertSee('id="note-row-'.$notes->last()->id.'"', false)
+        ->assertDontSee('Load more')
+        ->assertSet('matchedNotesCount', 101)
+        ->assertSet('listStatusMessage', '1 notes loaded. 101 notes total.')
+        ->assertDispatched('focus-target', fn (string $event, array $params): bool => $params['id'] === 'note-list-heading');
+
+    Livewire::test('notes.index')
+        ->set('sortBy', 'title_desc')
+        ->assertSee('id="note-row-'.$notes->last()->id.'"', false)
+        ->assertDontSee('id="note-row-'.$notes->first()->id.'"', false)
+        ->call('loadMoreNotes')
+        ->assertSet('hasMoreNotes', true)
+        ->call('loadMoreNotes')
+        ->assertSee('id="note-row-'.$notes->first()->id.'"', false)
+        ->assertDontSee('Load more');
+});
+
+test('[AC-5] clears the editor when a committed search excludes its selected note', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Keep this note', 'content' => '<p>Draft</p>']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->call('selectNote', $note->id)
+        ->set('title', 'Unsaved title')
+        ->set('search', 'not found')
+        ->assertSet('selectedNoteId', null)
+        ->assertSet('title', '')
+        ->assertSet('content', '')
+        ->assertDispatched('focus-target', fn (string $event, array $params): bool => $params['id'] === 'note-list-heading');
+});
+
+test('[AC-8] discards a cursor whose anchor belongs to another user', function () {
+    $owner = User::factory()->create();
+    $intruder = User::factory()->create();
+    $foreignNote = $owner->notes()->create(['title' => 'Private note', 'content' => '']);
+    $ownNote = $intruder->notes()->create(['title' => 'My note', 'content' => '']);
+    $cursor = rtrim(strtr(base64_encode(json_encode([
+        'v' => 1,
+        'sort' => 'newest',
+        'filter' => ['search' => '', 'folder_id' => null, 'trash' => false],
+        'key' => $foreignNote->updated_at->utc()->format('Y-m-d\TH:i:s.u\Z'),
+        'anchor' => $foreignNote->portable_id,
+    ], JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
+
+    $this->actingAs($intruder);
+
+    Livewire::test('notes.index')
+        ->set('notesCursor', $cursor)
+        ->call('loadMoreNotes')
+        ->assertSee($ownNote->title)
+        ->assertDontSee($foreignNote->title)
+        ->assertSet('notesCursor', null)
+        ->assertSet('listStatusMessage', 'The note list was refreshed because its page was no longer valid.');
+});
+
+test('[AC-9] reads a bounded content preview for the note list', function () {
+    $user = User::factory()->create();
+    $user->notes()->create([
+        'title' => 'Long body',
+        'content' => str_repeat('x', 3000),
+    ]);
+
+    $listQueries = [];
+
+    DB::listen(function (QueryExecuted $query) use (&$listQueries): void {
+        if (str_contains(strtolower($query->sql), 'substr(notes.content, 1, 2000)')) {
+            $listQueries[] = strtolower($query->sql);
+        }
+    });
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->assertSee(str_repeat('x', 117).'...')
+        ->assertDontSee(str_repeat('x', 121), false);
+
+    expect($listQueries)->toHaveCount(1)
+        ->and($listQueries[0])->toContain('limit 51');
+});
+
+test('[AC-7] backfills normalized note title keys across chunk boundaries and adds read indexes', function () {
+    $user = User::factory()->create();
+    $migration = require database_path('migrations/2026_11_21_143804_add_title_key_and_read_indexes_to_notes_table.php');
+
+    $migration->down();
+
+    $timestamp = now()->toDateTimeString();
+    $notes = [];
+
+    for ($index = 0; $index < 501; $index++) {
+        $notes[] = [
+            'user_id' => $user->id,
+            'portable_id' => (string) Str::uuid(),
+            'title' => $index === 500 ? " \u{2003}CAFÉ\u{0085}" : 'Title '.$index,
+            'content' => '',
+            'version' => 1,
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ];
+    }
+
+    foreach (array_chunk($notes, 100) as $chunk) {
+        DB::table('notes')->insert($chunk);
+    }
+
+    $migration->up();
+
+    expect(DB::table('notes')->whereNull('title_key')->count())->toBe(0)
+        ->and(DB::table('notes')->where('title', " \u{2003}CAFÉ\u{0085}")->value('title_key'))->toBe('café');
+
+    $indexes = collect(DB::select("PRAGMA index_list('notes')"))->pluck('name');
+
+    expect($indexes)->toContain(
+        'notes_user_updated_id_index',
+        'notes_user_folder_updated_id_index',
+        'notes_user_deleted_updated_id_index',
+        'notes_user_title_key_id_index',
+    );
+});
+
+test('[AC-12] declares the Dexie indexes required by local note paging', function () {
+    $source = file_get_contents(resource_path('js/offline-app.js'));
+
+    expect($source)->toContain(
+        '[user_id+updated_at+portable_id]',
+        '[user_id+folder_portable_id+updated_at+portable_id]',
+        '[user_id+deleted_at+updated_at+portable_id]',
+        '[user_id+title_key+portable_id]',
+    );
+});
+
 test('rejects saving a note into another users folder', function () {
     $user = User::factory()->create();
     $victim = User::factory()->create();

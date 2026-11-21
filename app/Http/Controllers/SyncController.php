@@ -770,6 +770,7 @@ class SyncController extends Controller
             'portable_id' => $note->portable_id,
             'folder_portable_id' => $note->folder?->portable_id,
             'title' => $note->title,
+            'title_key' => $note->title_key,
             'content' => $note->content ?? '',
             'version' => (int) $note->version,
             'deleted_at' => $note->deleted_at?->toISOString(),

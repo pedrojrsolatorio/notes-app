@@ -37,6 +37,8 @@ new class extends Component
 
     public function mount(): void
     {
+        $this->loadFirstNotePage();
+
         $portableId = request()->query('note');
 
         if ($portableId === null) {
@@ -219,6 +221,27 @@ new class extends Component
 
     public bool $isTrashView = false;
 
+    #[Locked]
+    public array $noteRows = [];
+
+    public ?string $notesCursor = null;
+
+    #[Locked]
+    public bool $hasMoreNotes = false;
+
+    #[Locked]
+    public ?int $matchedNotesCount = null;
+
+    #[Locked]
+    public string $listStatusMessage = '';
+
+    #[Locked]
+    public int $listMessageId = 0;
+
+    /** @var array{id: int, title: string, content: string, folder_id: int|null}|null */
+    #[Locked]
+    public ?array $suspendedNoteDraft = null;
+
     public bool $showFolderModal = false;
 
     public string $folderName = '';
@@ -245,7 +268,34 @@ new class extends Component
 
     public function selectFolder(?int $folderId): void
     {
+        $this->suspendedNoteDraft = null;
+        $changed = $this->selectedFolderId !== $folderId || $this->isTrashView;
         $this->selectedFolderId = $folderId;
+        $this->isTrashView = false;
+
+        if ($changed) {
+            $this->resetNoteList(focus: true);
+        }
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->resetNoteList(focus: false);
+    }
+
+    public function updatedSortBy(): void
+    {
+        $this->resetNoteList(focus: true);
+    }
+
+    public function updatedSelectedFolderId(): void
+    {
+        $this->resetNoteList(focus: true);
+    }
+
+    public function updatedIsTrashView(): void
+    {
+        $this->resetNoteList(focus: true);
     }
 
     public function openCreateFolderModal(): void
@@ -335,6 +385,7 @@ new class extends Component
         }
 
         $this->dispatch('focus-target', id: $this->selectedNoteId ? 'note-folder' : 'note-list-heading');
+        $this->resetNoteList(focus: false);
 
         Flux::toast(variant: 'success', text: __('Folder deleted. Its notes remain in All Notes.'));
     }
@@ -395,6 +446,7 @@ new class extends Component
     public function selectNote(int $noteId): void
     {
         $this->unavailableNote = false;
+        $this->suspendedNoteDraft = null;
 
         $note = auth()->user()->notes()->findOrFail($noteId);
 
@@ -432,6 +484,7 @@ new class extends Component
             'folder_id' => $validated['noteFolderId'],
         ]);
 
+        $this->resetNoteList(focus: false);
         $this->dispatch('note-saved');
         Flux::toast(variant: 'success', text: __('Note saved.'));
     }
@@ -445,6 +498,7 @@ new class extends Component
             'content' => '',
         ]);
 
+        $this->resetNoteList(focus: false);
         Flux::toast(variant: 'success', text: __('Note created.'));
     }
 
@@ -515,6 +569,8 @@ new class extends Component
         $this->selectedFolderId = null;
         $this->search = '';
         $this->sortBy = 'newest';
+        $this->resetNoteList(focus: false);
+        $this->restoreSuspendedNoteDraft();
         $this->dispatch('quick-capture-closed');
 
         Flux::toast(variant: 'success', text: __('Note captured.'));
@@ -570,7 +626,7 @@ new class extends Component
 
         $note = auth()->user()->notes()->findOrFail($this->selectedNoteId);
 
-        $ids = $this->noteListQuery(auth()->user())->pluck('id')->all();
+        $ids = array_column($this->noteRows, 'id');
         $index = array_search($note->id, $ids, true);
         $nextId = $index === false ? null : ($ids[$index + 1] ?? $ids[$index - 1] ?? null);
 
@@ -581,7 +637,13 @@ new class extends Component
         $this->content = '';
         $this->noteFolderId = null;
 
-        $this->dispatch('focus-target', id: $nextId ? 'note-row-'.$nextId : 'note-list-heading');
+        $this->resetNoteList(focus: false);
+        $this->dispatch(
+            'focus-target',
+            id: $nextId !== null && collect($this->noteRows)->contains('id', $nextId)
+                ? 'note-row-'.$nextId
+                : 'note-list-heading'
+        );
 
         Flux::toast(variant: 'success', text: __('Note moved to trash.'));
     }
@@ -602,6 +664,7 @@ new class extends Component
             $note->restore();
         });
 
+        $this->resetNoteList(focus: false);
         $this->dispatch('focus-target', id: 'note-list-heading');
 
         Flux::toast(variant: 'success', text: __('Note restored.'));
@@ -611,19 +674,26 @@ new class extends Component
     {
         $note = auth()->user()->notes()->onlyTrashed()->findOrFail($noteId);
 
-        $ids = $this->noteListQuery(auth()->user())->pluck('id')->all();
+        $ids = array_column($this->noteRows, 'id');
         $index = array_search($note->id, $ids, true);
         $nextId = $index === false ? null : ($ids[$index + 1] ?? $ids[$index - 1] ?? null);
 
         $note->forceDelete();
 
-        $this->dispatch('focus-target', id: $nextId ? 'restore-note-'.$nextId : 'note-list-heading');
+        $this->resetNoteList(focus: false);
+        $this->dispatch(
+            'focus-target',
+            id: $nextId !== null && collect($this->noteRows)->contains('id', $nextId)
+                ? 'restore-note-'.$nextId
+                : 'note-list-heading'
+        );
 
         Flux::toast(variant: 'success', text: __('Note permanently deleted.'));
     }
 
     public function showTrash(): void
     {
+        $this->suspendedNoteDraft = null;
         $this->isTrashView = true;
         $this->selectedFolderId = null;
         $this->selectedNoteId = null;
@@ -633,6 +703,7 @@ new class extends Component
         $this->showQuickCaptureModal = false;
         $this->quickCaptureText = '';
         $this->resetValidation('quickCaptureText');
+        $this->resetNoteList(focus: false);
     }
 
     public function showNotes(): void
@@ -723,35 +794,292 @@ new class extends Component
             });
         }
 
-        switch ($this->sortBy) {
-            case 'oldest':
-                $notesQuery->oldest();
-                break;
+        return $notesQuery;
+    }
 
-            case 'title_asc':
-                $notesQuery->orderByRaw('LOWER(title) ASC');
-                break;
+    private function normalizedSort(): string
+    {
+        return in_array($this->sortBy, ['newest', 'oldest', 'title_asc', 'title_desc'], true)
+            ? $this->sortBy
+            : 'newest';
+    }
 
-            case 'title_desc':
-                $notesQuery->orderByRaw('LOWER(title) DESC');
-                break;
+    /**
+     * @return array{search: string, folder_id: int|null, trash: bool}
+     */
+    private function noteListFilter(): array
+    {
+        return [
+            'search' => trim($this->search),
+            'folder_id' => $this->isTrashView ? null : $this->selectedFolderId,
+            'trash' => $this->isTrashView,
+        ];
+    }
 
-            default:
-                $notesQuery->latest();
-                break;
+    private function loadFirstNotePage(?string $statusMessage = null): void
+    {
+        $this->notesCursor = null;
+        $this->noteRows = [];
+        $this->hasMoreNotes = false;
+        $this->matchedNotesCount = null;
+
+        try {
+            $page = $this->queryNotePage();
+            $this->noteRows = $page['rows'];
+            $this->notesCursor = $page['cursor'];
+            $this->hasMoreNotes = $page['has_more'];
+            $this->matchedNotesCount = $page['matched_count'];
+        } catch (QueryException) {
+            $statusMessage = __('Notes could not be loaded. Try again.');
         }
 
-        return $notesQuery;
+        if ($statusMessage !== null) {
+            $this->announceListStatus($statusMessage);
+        }
+    }
+
+    private function resetNoteList(bool $focus, ?string $statusMessage = null): void
+    {
+        $user = auth()->user();
+
+        if ($this->selectedNoteId !== null) {
+            $selectedNoteMatches = ! $this->isTrashView
+                && $this->noteListQuery($user)->whereKey($this->selectedNoteId)->exists();
+
+            if (! $selectedNoteMatches) {
+                $this->suspendedNoteDraft ??= [
+                    'id' => $this->selectedNoteId,
+                    'title' => $this->title,
+                    'content' => $this->content,
+                    'folder_id' => $this->noteFolderId,
+                ];
+                $this->selectedNoteId = null;
+                $this->title = '';
+                $this->content = '';
+                $this->noteFolderId = null;
+                $focus = true;
+            }
+        }
+
+        $this->loadFirstNotePage($statusMessage);
+
+        if ($focus) {
+            $this->dispatch('focus-target', id: 'note-list-heading');
+        }
+    }
+
+    private function restoreSuspendedNoteDraft(): void
+    {
+        $draft = $this->suspendedNoteDraft;
+        $this->suspendedNoteDraft = null;
+
+        if ($draft === null || auth()->user()->notes()->find($draft['id']) === null) {
+            return;
+        }
+
+        $this->selectedNoteId = $draft['id'];
+        $this->title = $draft['title'];
+        $this->content = $draft['content'];
+        $this->noteFolderId = $draft['folder_id'];
+    }
+
+    public function loadMoreNotes(): void
+    {
+        if ($this->notesCursor === null) {
+            return;
+        }
+
+        $cursor = $this->validatedNotesCursor($this->notesCursor);
+
+        if ($cursor === null) {
+            $this->resetNoteList(
+                focus: true,
+                statusMessage: __('The note list was refreshed because its page was no longer valid.')
+            );
+
+            return;
+        }
+
+        try {
+            $page = $this->queryNotePage($cursor);
+        } catch (QueryException) {
+            $this->announceListStatus(__('Could not load more notes. Try again.'));
+
+            return;
+        }
+
+        $this->noteRows = [...$this->noteRows, ...$page['rows']];
+        $this->notesCursor = $page['cursor'];
+        $this->hasMoreNotes = $page['has_more'];
+        $this->matchedNotesCount = $page['matched_count'];
+
+        $message = __(':count notes loaded.', ['count' => count($page['rows'])]);
+
+        if (! $page['has_more']) {
+            $message .= ' '.__(':count notes total.', ['count' => $page['matched_count']]);
+            $this->dispatch('focus-target', id: 'note-list-heading');
+        } else {
+            $this->dispatch('focus-target', id: 'load-more-notes');
+        }
+
+        $this->announceListStatus($message);
+    }
+
+    private function announceListStatus(string $message): void
+    {
+        $this->listStatusMessage = $message;
+        $this->listMessageId++;
+    }
+
+    /**
+     * @param  array{v: int, sort: string, filter: array, key: string, anchor: string, anchor_id: int}|null  $cursor
+     * @return array{rows: list<array{id: int, portable_id: string, title: string, content: string, reminder_at: string|null, reminder_status: string|null}>, cursor: string|null, has_more: bool, matched_count: int|null}
+     */
+    private function queryNotePage(?array $cursor = null): array
+    {
+        $user = auth()->user();
+        $sort = $this->normalizedSort();
+        $query = $this->noteListQuery($user);
+
+        if ($cursor !== null) {
+            $column = in_array($sort, ['newest', 'oldest'], true) ? 'updated_at' : 'title_key';
+            $key = $column === 'updated_at'
+                ? CarbonImmutable::parse($cursor['key'])->utc()->format('Y-m-d H:i:s')
+                : $cursor['key'];
+            $comparison = in_array($sort, ['newest', 'title_desc'], true) ? '<' : '>';
+
+            $query->where(function ($query) use ($column, $comparison, $key, $cursor): void {
+                $query->where($column, $comparison, $key)
+                    ->orWhere(function ($query) use ($column, $comparison, $key, $cursor): void {
+                        $query->where($column, $key)
+                            ->where('id', $comparison, $cursor['anchor_id']);
+                    });
+            });
+        }
+
+        match ($sort) {
+            'oldest' => $query->orderBy('updated_at')->orderBy('id'),
+            'title_asc' => $query->orderBy('title_key')->orderBy('id'),
+            'title_desc' => $query->orderByDesc('title_key')->orderByDesc('id'),
+            default => $query->orderByDesc('updated_at')->orderByDesc('id'),
+        };
+
+        $notes = $query
+            ->select([
+                'notes.id',
+                'notes.portable_id',
+                'notes.title',
+                'notes.title_key',
+                'notes.reminder_at',
+                'notes.reminder_status',
+                'notes.updated_at',
+            ])
+            ->selectRaw('substr(notes.content, 1, 2000) as content')
+            ->limit(51)
+            ->get();
+
+        $hasMore = $notes->count() > 50;
+        $visibleNotes = $notes->take(50);
+        $lastNote = $visibleNotes->last();
+        $nextCursor = $hasMore && $lastNote !== null
+            ? $this->encodeNotesCursor($lastNote, $sort)
+            : null;
+        $matchedCount = $hasMore ? null : $this->noteListQuery($user)->count();
+
+        return [
+            'rows' => $visibleNotes->map(fn (Note $note): array => [
+                'id' => (int) $note->getKey(),
+                'portable_id' => $note->portable_id,
+                'title' => $note->title,
+                'content' => $note->content ?? '',
+                'reminder_at' => $note->reminder_at?->utc()->toISOString(),
+                'reminder_status' => $note->reminder_status,
+            ])->values()->all(),
+            'cursor' => $nextCursor,
+            'has_more' => $hasMore,
+            'matched_count' => $matchedCount,
+        ];
+    }
+
+    private function encodeNotesCursor(Note $note, string $sort): string
+    {
+        $key = in_array($sort, ['newest', 'oldest'], true)
+            ? $note->updated_at->utc()->format('Y-m-d\TH:i:s.u\Z')
+            : $note->title_key;
+        $json = json_encode([
+            'v' => 1,
+            'sort' => $sort,
+            'filter' => $this->noteListFilter(),
+            'key' => $key,
+            'anchor' => $note->portable_id,
+        ], JSON_THROW_ON_ERROR);
+
+        return rtrim(strtr(base64_encode($json), '+/', '-_'), '=');
+    }
+
+    /**
+     * @return array{v: int, sort: string, filter: array, key: string, anchor: string, anchor_id: int}|null
+     */
+    private function validatedNotesCursor(string $value): ?array
+    {
+        $json = base64_decode(strtr($value, '-_', '+/'), true);
+
+        if ($json === false) {
+            return null;
+        }
+
+        try {
+            $cursor = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return null;
+        }
+
+        if (! is_array($cursor)
+            || ($cursor['v'] ?? null) !== 1
+            || ($cursor['sort'] ?? null) !== $this->normalizedSort()
+            || ($cursor['filter'] ?? null) !== $this->noteListFilter()
+            || ! is_string($cursor['key'] ?? null)
+            || ! is_string($cursor['anchor'] ?? null)) {
+            return null;
+        }
+
+        $user = auth()->user();
+        $anchor = $this->noteListQuery($user)
+            ->where('portable_id', $cursor['anchor'])
+            ->first(['id', 'portable_id', 'updated_at', 'title_key']);
+
+        if ($anchor === null) {
+            return null;
+        }
+
+        $expectedKey = in_array($cursor['sort'], ['newest', 'oldest'], true)
+            ? $anchor->updated_at->utc()->format('Y-m-d\TH:i:s.u\Z')
+            : $anchor->title_key;
+
+        if (! is_string($expectedKey) || $cursor['key'] !== $expectedKey) {
+            return null;
+        }
+
+        return [
+            'v' => 1,
+            'sort' => $cursor['sort'],
+            'filter' => $cursor['filter'],
+            'key' => $cursor['key'],
+            'anchor' => $cursor['anchor'],
+            'anchor_id' => (int) $anchor->getKey(),
+        ];
     }
 
     public function render()
     {
         $user = auth()->user();
-
         $folders = $user->folders()->orderBy('name_key')->get();
-
-        $notes = $this->noteListQuery($user)->get();
-
+        $notes = collect($this->noteRows)->map(fn (array $row): object => (object) [
+            ...$row,
+            'reminder_at' => $row['reminder_at'] === null
+                ? null
+                : CarbonImmutable::parse($row['reminder_at']),
+        ]);
         $selectedNote = null;
 
         if ($this->selectedNoteId && ! $this->isTrashView) {
@@ -990,6 +1318,11 @@ new class extends Component
                 </div>
             </div>
 
+            <p id="notes-list-status" data-status-message-id="{{ $listMessageId }}" role="status"
+                aria-live="polite" aria-atomic="true" class="sr-only">
+                {{ $listStatusMessage }}
+            </p>
+
             @if ($unavailableNote)
                 <p class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100" role="status">
                     {{ __('This note is no longer available') }}
@@ -1085,6 +1418,16 @@ new class extends Component
                             @endif
                         </article>
                     @endforeach
+                </div>
+            @endif
+
+            @if ($hasMoreNotes)
+                <div class="mt-4">
+                    <button type="button" id="load-more-notes" wire:click="loadMoreNotes"
+                        wire:loading.attr="disabled" wire:target="loadMoreNotes"
+                        class="min-h-11 rounded-lg border px-4 py-2 text-sm font-medium">
+                        {{ __('Load more') }}
+                    </button>
                 </div>
             @endif
             </div>

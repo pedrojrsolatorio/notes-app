@@ -67,6 +67,15 @@ function openDb(userId) {
         sync_meta: "key",
     });
 
+    db.version(2).stores({
+        notes: "portable_id, [user_id+folder_portable_id], [user_id+sync_state], [user_id+updated_at], [user_id+deleted_at], [user_id+updated_at+portable_id], [user_id+folder_portable_id+updated_at+portable_id], [user_id+deleted_at+updated_at+portable_id], [user_id+title_key+portable_id]",
+        folders: "portable_id, [user_id+sync_state], [user_id+updated_at]",
+        outbox: "client_change_id, user_id, [user_id+created_at]",
+        sync_meta: "key",
+    }).upgrade((transaction) => transaction.table("notes").toCollection().modify((note) => {
+        note.title_key = note.title_key ?? titleKeyFor(note.title ?? "");
+    }));
+
     databases.set(userId, db);
 
     return db;
@@ -291,6 +300,7 @@ async function pull(db, userId) {
                     user_id: userId,
                     folder_portable_id: note.folder_portable_id ?? null,
                     title: note.title,
+                    title_key: note.title_key ?? titleKeyFor(note.title),
                     content: note.content ?? "",
                     version: note.version,
                     deleted_at: note.deleted_at ?? null,
@@ -500,6 +510,7 @@ async function insertServerNote(db, userId, note) {
         user_id: userId,
         folder_portable_id: note.folder_portable_id ?? null,
         title: note.title,
+        title_key: note.title_key ?? titleKeyFor(note.title),
         content: note.content ?? "",
         version: note.version,
         deleted_at: note.deleted_at ?? null,
@@ -547,8 +558,21 @@ async function syncNow({ manual = false } = {}) {
         setRuntime({ syncing: true, lastError: null });
 
         try {
+            const previousRevision = Number(await metaGet(runtime.db, "last_revision", 0) ?? 0);
             const summary = await push(runtime.db, runtime.userId);
             await pull(runtime.db, runtime.userId);
+            const currentRevision = Number(await metaGet(runtime.db, "last_revision", 0) ?? 0);
+
+            if (
+                currentRevision > previousRevision
+                && uiState.lastRefreshRevision !== currentRevision
+            ) {
+                uiState.lastRefreshRevision = currentRevision;
+                await resetOfflineList({
+                    focusHeading: false,
+                    statusMessage: "Your notes list was refreshed.",
+                });
+            }
 
             if (summary.rejected > 0 || summary.conflicts > 0) {
                 renderAll();
@@ -610,6 +634,7 @@ async function saveNote(portableId, { title, content, folder_portable_id }) {
         portable_id: portableId,
         user_id: userId,
         title,
+        title_key: titleKeyFor(title),
         content,
         folder_portable_id,
         version: baseVersion,
@@ -629,6 +654,7 @@ async function saveNote(portableId, { title, content, folder_portable_id }) {
         base_version: baseVersion,
     });
 
+    await resetOfflineList({ focusHeading: false });
     renderAll();
     syncNow();
 }
@@ -642,20 +668,17 @@ async function trashNote(portableId) {
         return;
     }
 
-    const siblings = (await filteredNotes()).map((note) => note.portable_id);
-    const index = siblings.indexOf(portableId);
-    const nextId = index === -1 ? null : (siblings[index + 1] ?? siblings[index - 1] ?? null);
-
     uiState.selectedNoteId = null;
     uiState.mobileView = "list";
-    uiState.focusNoteId = nextId;
-    uiState.focusListHeading = nextId === null;
+    uiState.focusNoteId = null;
+    uiState.focusListHeading = true;
 
     if (local.last_synced_at == null) {
         await db.notes.delete(portableId);
         await db.outbox.where("user_id").equals(userId)
             .filter((row) => row.entity_type === "note" && row.entity_portable_id === portableId)
             .delete();
+        await resetOfflineList();
         renderAll();
         syncNow();
         return;
@@ -675,6 +698,7 @@ async function trashNote(portableId) {
         base_version: local.version,
     });
 
+    await resetOfflineList();
     renderAll();
     syncNow();
 }
@@ -706,6 +730,7 @@ async function restoreNote(portableId) {
         base_version: local.version,
     });
 
+    await resetOfflineList();
     renderAll();
     syncNow();
 }
@@ -719,20 +744,17 @@ async function purgeNote(portableId) {
         return;
     }
 
-    const siblings = (await filteredNotes()).map((note) => note.portable_id);
-    const index = siblings.indexOf(portableId);
-    const nextId = index === -1 ? null : (siblings[index + 1] ?? siblings[index - 1] ?? null);
-
     uiState.selectedNoteId = null;
     uiState.mobileView = "list";
-    uiState.focusNoteId = nextId;
-    uiState.focusListHeading = nextId === null;
+    uiState.focusNoteId = null;
+    uiState.focusListHeading = true;
 
     if (local.last_synced_at == null) {
         await db.notes.delete(portableId);
         await db.outbox.where("user_id").equals(userId)
             .filter((row) => row.entity_type === "note" && row.entity_portable_id === portableId)
             .delete();
+        await resetOfflineList();
         renderAll();
         syncNow();
         return;
@@ -748,6 +770,7 @@ async function purgeNote(portableId) {
         base_version: local.version,
     });
 
+    await resetOfflineList();
     renderAll();
     syncNow();
 }
@@ -775,7 +798,6 @@ async function createFolder(name) {
         base_version: 0,
     });
 
-    renderAll();
     syncNow();
 
     return portableId;
@@ -816,7 +838,7 @@ async function deleteFolder(portableId) {
     await db.transaction("rw", [db.folders, db.notes], async () => {
         await db.folders.delete(portableId);
 
-        await db.notes.where("folder_portable_id").equals(portableId)
+        await db.notes.where("[user_id+folder_portable_id]").equals([userId, portableId])
             .modify((note) => {
                 note.folder_portable_id = null;
             });
@@ -832,7 +854,6 @@ async function deleteFolder(portableId) {
         await db.outbox.where("user_id").equals(userId)
             .filter((row) => row.entity_type === "folder" && row.entity_portable_id === portableId)
             .delete();
-        renderAll();
         syncNow();
         return;
     }
@@ -845,7 +866,6 @@ async function deleteFolder(portableId) {
         base_version: local.version,
     });
 
-    renderAll();
     syncNow();
 }
 
@@ -854,6 +874,11 @@ async function deleteFolder(portableId) {
 // ===========================================================================
 
 const TRIM_RE = /^[\p{Z}\x09-\x0D\u0085\uFEFF]+|[\p{Z}\x09-\x0D\u0085\uFEFF]+$/gu;
+const TITLE_KEY_TRIM_RE = /^[\p{Z}\x09-\x0D\u0085]+|[\p{Z}\x09-\x0D\u0085]+$/gu;
+
+function titleKeyFor(title) {
+    return title.replace(TITLE_KEY_TRIM_RE, "").toLowerCase();
+}
 
 function normalizeText(text) {
     return text.replace(/\r\n?/g, "\n").replace(TRIM_RE, "");
@@ -917,12 +942,25 @@ const uiState = {
     focusNoteId: null,
     focusEditorHeading: false,
     focusListHeading: false,
+    focusLoadMore: false,
     focusFolderSelect: false,
+    noteRows: [],
+    notesCursor: null,
+    hasMoreNotes: false,
+    matchedNotesCount: null,
+    notesLoading: false,
+    listInitialized: false,
+    listStatusMessage: "",
+    listStatusMessageId: 0,
+    pendingListStatusMessage: null,
+    lastRefreshRevision: null,
     editor: null,
     editorNoteId: null,
     editorMount: null,
     editorDeletedAt: null,
 };
+
+let searchTimeout = null;
 
 function notice(message) {
     runtime.notices.push(message);
@@ -1081,48 +1119,329 @@ async function renderStatus() {
 
 }
 
-async function filteredNotes() {
-    const db = runtime.db;
+function localListFilter() {
+    return {
+        search: uiState.search.trim(),
+        folder_id: uiState.view === "trash" ? null : uiState.folderId,
+        trash: uiState.view === "trash",
+    };
+}
+
+function localSortName() {
+    if (uiState.sort === "title_az") {
+        return "title_asc";
+    }
+
+    if (uiState.sort === "title_za") {
+        return "title_desc";
+    }
+
+    return uiState.sort === "oldest" ? "oldest" : "newest";
+}
+
+function localNoteMatches(note, filter) {
+    if (note.user_id !== runtime.userId) {
+        return false;
+    }
+
+    if (filter.trash ? note.deleted_at == null : note.deleted_at != null) {
+        return false;
+    }
+
+    if (filter.folder_id !== null && note.folder_portable_id !== filter.folder_id) {
+        return false;
+    }
+
+    if (filter.search !== "") {
+        const haystack = `${note.title} ${plainText(note.content ?? "")}`.toLowerCase();
+
+        if (! haystack.includes(filter.search.toLowerCase())) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function localCursorKey(note, sort) {
+    if (sort === "title_asc" || sort === "title_desc") {
+        return note.title_key ?? titleKeyFor(note.title ?? "");
+    }
+
+    const timestamp = new Date(note.updated_at ?? note.created_at).toISOString();
+
+    return timestamp.replace(/\.(\d{3})Z$/, (_, milliseconds) => `.${milliseconds}000Z`);
+}
+
+function encodeLocalCursor(cursor) {
+    const bytes = new TextEncoder().encode(JSON.stringify(cursor));
+    let binary = "";
+
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+
+    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
+function decodeLocalCursor(value) {
+    try {
+        const binary = atob(value.replaceAll("-", "+").replaceAll("_", "/"));
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        return JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+        return null;
+    }
+}
+
+function localNoteIndex(sort, filter) {
     const userId = runtime.userId;
+    const minimum = Dexie.minKey;
+    const maximum = Dexie.maxKey;
+    const titleSort = sort === "title_asc" || sort === "title_desc";
+    const useFolderIndex = ! titleSort && ! filter.trash && filter.folder_id !== null;
+    const index = titleSort
+        ? "[user_id+title_key+portable_id]"
+        : useFolderIndex
+            ? "[user_id+folder_portable_id+updated_at+portable_id]"
+            : "[user_id+updated_at+portable_id]";
+    const lower = useFolderIndex
+        ? [userId, filter.folder_id, minimum, minimum]
+        : [userId, minimum, minimum];
+    const upper = useFolderIndex
+        ? [userId, filter.folder_id, maximum, maximum]
+        : [userId, maximum, maximum];
 
-    let rows = await db.notes.where("user_id").equals(userId).toArray();
+    return { index, lower, upper, useFolderIndex, titleSort };
+}
 
-    if (uiState.view === "trash") {
-        rows = rows.filter((note) => note.deleted_at !== null);
-    } else {
-        rows = rows.filter((note) => note.deleted_at === null);
+function localIndexKey(note, sort, filter, useFolderIndex) {
+    if (useFolderIndex) {
+        return [runtime.userId, filter.folder_id, note.updated_at, note.portable_id];
     }
 
-    if (uiState.folderId) {
-        rows = rows.filter((note) => note.folder_portable_id === uiState.folderId);
+    if (sort === "title_asc" || sort === "title_desc") {
+        return [runtime.userId, localCursorKey(note, sort), note.portable_id];
     }
 
-    if (uiState.search.trim() !== "") {
-        const needle = uiState.search.trim().toLowerCase();
+    return [runtime.userId, note.updated_at, note.portable_id];
+}
 
-        rows = rows.filter((note) => {
-            const haystack = `${note.title} ${plainText(note.content)}`.toLowerCase();
-            return haystack.includes(needle);
-        });
+async function readLocalNotePage(cursorValue = null) {
+    const filter = localListFilter();
+    const sort = localSortName();
+    const { index, lower, upper, useFolderIndex } = localNoteIndex(sort, filter);
+    const descending = sort === "newest" || sort === "title_desc";
+    let anchor = null;
+    let rangeStart = lower;
+    let rangeEnd = upper;
+    let includeStart = true;
+    let includeEnd = true;
+
+    if (cursorValue !== null) {
+        const cursor = decodeLocalCursor(cursorValue);
+
+        if (
+            ! cursor
+            || cursor.v !== 1
+            || cursor.sort !== sort
+            || JSON.stringify(cursor.filter) !== JSON.stringify(filter)
+            || typeof cursor.key !== "string"
+            || typeof cursor.anchor !== "string"
+        ) {
+            return { invalid: true };
+        }
+
+        anchor = await runtime.db.notes.get(cursor.anchor);
+
+        if (
+            ! anchor
+            || ! localNoteMatches(anchor, filter)
+            || localCursorKey(anchor, sort) !== cursor.key
+        ) {
+            return { invalid: true };
+        }
+
+        const anchorKey = localIndexKey(anchor, sort, filter, useFolderIndex);
+
+        if (descending) {
+            rangeEnd = anchorKey;
+            includeEnd = false;
+        } else {
+            rangeStart = anchorKey;
+            includeStart = false;
+        }
     }
 
-    const byTime = (a, b) => new Date(b.updated_at ?? b.created_at) - new Date(a.updated_at ?? a.created_at);
+    let collection = runtime.db.notes
+        .where(index)
+        .between(rangeStart, rangeEnd, includeStart, includeEnd);
 
-    switch (uiState.sort) {
-        case "oldest":
-            rows.sort((a, b) => -byTime(a, b));
-            break;
-        case "title_az":
-            rows.sort((a, b) => a.title.localeCompare(b.title));
-            break;
-        case "title_za":
-            rows.sort((a, b) => b.title.localeCompare(a.title));
-            break;
-        default:
-            rows.sort(byTime);
+    if (descending) {
+        collection = collection.reverse();
     }
 
-    return rows;
+    const matchingNotes = await collection
+        .filter((note) => localNoteMatches(note, filter))
+        .limit(51)
+        .toArray();
+    const hasMore = matchingNotes.length > 50;
+    const notes = matchingNotes.slice(0, 50);
+    const lastNote = notes.at(-1);
+    const nextCursor = hasMore && lastNote
+        ? encodeLocalCursor({
+            v: 1,
+            sort,
+            filter,
+            key: localCursorKey(lastNote, sort),
+            anchor: lastNote.portable_id,
+        })
+        : null;
+    const matchedCount = hasMore
+        ? null
+        : await runtime.db.notes
+            .where(index)
+            .between(lower, upper)
+            .filter((note) => localNoteMatches(note, filter))
+            .count();
+
+    return {
+        invalid: false,
+        notes: notes.map((note) => ({
+            ...note,
+            content: (note.content ?? "").slice(0, 2000),
+        })),
+        cursor: nextCursor,
+        hasMore,
+        matchedCount,
+    };
+}
+
+async function loadFirstLocalNotePage() {
+    try {
+        const page = await readLocalNotePage();
+        uiState.noteRows = page.notes;
+        uiState.notesCursor = page.cursor;
+        uiState.hasMoreNotes = page.hasMore;
+        uiState.matchedNotesCount = page.matchedCount;
+        uiState.listInitialized = true;
+
+        const statusMessage = uiState.pendingListStatusMessage
+            ?? (page.hasMore ? "" : `${page.matchedCount} notes total.`);
+        uiState.pendingListStatusMessage = null;
+
+        setLocalListStatus(statusMessage);
+    } catch {
+        uiState.noteRows = [];
+        uiState.notesCursor = null;
+        uiState.hasMoreNotes = false;
+        uiState.listInitialized = true;
+        uiState.pendingListStatusMessage = null;
+        setLocalListStatus("Notes could not be loaded. Try again.");
+    }
+}
+
+function setLocalListStatus(message) {
+    uiState.listStatusMessage = message;
+    uiState.listStatusMessageId++;
+}
+
+function renderListStatus() {
+    const status = document.getElementById("notes-list-status");
+
+    if (!status || status.dataset.statusMessageId === String(uiState.listStatusMessageId)) {
+        return;
+    }
+
+    status.dataset.statusMessageId = String(uiState.listStatusMessageId);
+    status.textContent = uiState.listStatusMessage;
+}
+
+async function resetOfflineList({ focusHeading = true, statusMessage = null } = {}) {
+    uiState.noteRows = [];
+    uiState.notesCursor = null;
+    uiState.hasMoreNotes = false;
+    uiState.matchedNotesCount = null;
+    uiState.listInitialized = false;
+    uiState.focusListHeading = focusHeading;
+
+    if (uiState.selectedNoteId !== null) {
+        const selected = await runtime.db.notes.get(uiState.selectedNoteId);
+
+        if (! selected || ! localNoteMatches(selected, localListFilter())) {
+            uiState.selectedNoteId = null;
+            uiState.mobileView = "list";
+            uiState.focusListHeading = true;
+        }
+    }
+
+    if (statusMessage !== null) {
+        uiState.pendingListStatusMessage = statusMessage;
+    }
+}
+
+async function loadMoreLocalNotes() {
+    if (uiState.notesLoading || uiState.notesCursor === null) {
+        return;
+    }
+
+    uiState.notesLoading = true;
+    const cursorValue = uiState.notesCursor;
+    const button = document.getElementById("load-more-notes");
+
+    if (button) {
+        button.disabled = true;
+        button.textContent = "Loading…";
+    }
+
+    try {
+        const page = await readLocalNotePage(cursorValue);
+
+        if (uiState.notesCursor !== cursorValue) {
+            return;
+        }
+
+        if (page.invalid) {
+            await resetOfflineList({
+                focusHeading: true,
+                statusMessage: "The notes list was refreshed because its page was no longer valid.",
+            });
+            await renderAll();
+            return;
+        }
+
+        uiState.noteRows = [...uiState.noteRows, ...page.notes];
+        uiState.notesCursor = page.cursor;
+        uiState.hasMoreNotes = page.hasMore;
+        uiState.matchedNotesCount = page.matchedCount;
+
+        let message = `${page.notes.length} notes loaded.`;
+
+        if (! page.hasMore) {
+            message += ` ${page.matchedCount} notes total.`;
+            uiState.focusListHeading = true;
+        } else {
+            uiState.focusLoadMore = true;
+        }
+
+        setLocalListStatus(message);
+        await renderList();
+    } catch {
+        if (uiState.notesCursor !== cursorValue) {
+            return;
+        }
+
+        setLocalListStatus("Could not load more notes. Try again.");
+
+        if (button) {
+            button.disabled = false;
+            button.textContent = "Load more";
+        }
+
+        renderListStatus();
+    } finally {
+        uiState.notesLoading = false;
+    }
 }
 
 async function renderFolders(folders) {
@@ -1141,11 +1460,15 @@ async function renderFolders(folders) {
         onclick,
     });
 
-    container.append(item("All Notes", !uiState.folderId && uiState.view !== "trash", () => {
+    container.append(item("All Notes", !uiState.folderId && uiState.view !== "trash", async () => {
         uiState.folderId = null;
         uiState.view = "all";
         uiState.mobileView = "list";
-        renderAll();
+        if (searchTimeout !== null) {
+            clearTimeout(searchTimeout);
+        }
+        await resetOfflineList();
+        await renderAll();
     }));
 
     const sorted = [...folders].sort((a, b) => a.name.localeCompare(b.name));
@@ -1153,11 +1476,15 @@ async function renderFolders(folders) {
     for (const folder of sorted) {
         const row = el("div", { class: "flex items-center gap-1" });
 
-        row.append(item(folder.name, uiState.folderId === folder.portable_id, () => {
+        row.append(item(folder.name, uiState.folderId === folder.portable_id, async () => {
             uiState.folderId = folder.portable_id;
             uiState.view = "all";
             uiState.mobileView = "list";
-            renderAll();
+            if (searchTimeout !== null) {
+                clearTimeout(searchTimeout);
+            }
+            await resetOfflineList();
+            await renderAll();
         }));
 
         const rename = el("button", {
@@ -1183,7 +1510,8 @@ async function renderFolders(folders) {
                     if (uiState.folderId === folder.portable_id) {
                         uiState.folderId = null;
                     }
-                    renderAll();
+                    await resetOfflineList();
+                    await renderAll();
                 }
             },
         });
@@ -1192,11 +1520,15 @@ async function renderFolders(folders) {
         container.append(row);
     }
 
-    container.append(item("Trash", uiState.view === "trash", () => {
+    container.append(item("Trash", uiState.view === "trash", async () => {
         uiState.view = "trash";
         uiState.folderId = null;
         uiState.mobileView = "list";
-        renderAll();
+        if (searchTimeout !== null) {
+            clearTimeout(searchTimeout);
+        }
+        await resetOfflineList();
+        await renderAll();
     }));
 
     const newFolder = el("button", {
@@ -1208,7 +1540,8 @@ async function renderFolders(folders) {
             if (name && name.trim() !== "") {
                 uiState.folderId = await createFolder(name.trim());
                 uiState.mobileView = "list";
-                renderAll();
+                await resetOfflineList({ focusHeading: false });
+                await renderAll();
             }
         },
     });
@@ -1223,7 +1556,11 @@ async function renderList() {
         return;
     }
 
-    const notes = await filteredNotes();
+    if (!uiState.listInitialized) {
+        await loadFirstLocalNotePage();
+    }
+
+    const notes = uiState.noteRows;
     container.replaceChildren();
 
     if (notes.length === 0) {
@@ -1231,45 +1568,54 @@ async function renderList() {
             class: "p-4 text-sm text-zinc-500",
             text: uiState.search ? "No notes match your search." : "No notes here yet.",
         }));
-        return;
+    } else {
+        for (const note of notes) {
+            const active = note.portable_id === uiState.selectedNoteId;
+            const preview = plainText(note.content).slice(0, 120);
+            const item = el("button", {
+                type: "button",
+                "data-note-id": note.portable_id,
+                "aria-current": active ? "true" : "false",
+                "aria-label": note.title || "Untitled note",
+                class: `block min-h-11 w-full rounded-lg border p-3 text-left focus-visible:outline-3 focus-visible:outline-offset-2 ${active ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-800"}`,
+                onclick: () => {
+                    uiState.selectedNoteId = note.portable_id;
+                    uiState.mobileView = "editor";
+                    uiState.focusNoteId = note.portable_id;
+                    uiState.focusEditorHeading = true;
+                    renderAll();
+                },
+            });
+
+            const heading = el("div", { class: "flex items-center gap-2" });
+            heading.append(el("span", { class: "flex-1 truncate font-medium", text: note.title || "Untitled" }));
+
+            if (note.sync_state === "pending" || note.sync_state === "conflict") {
+                const dot = note.sync_state === "conflict" ? "bg-red-500" : "bg-amber-500";
+                heading.append(el("span", {
+                    class: `h-2 w-2 shrink-0 rounded-full ${dot}`,
+                    title: note.sync_state === "conflict" ? "Kept locally, server has a different version" : "Waiting to sync",
+                }));
+            }
+
+            item.append(heading);
+
+            if (preview) {
+                item.append(el("p", { class: "mt-1 truncate text-sm text-zinc-500", text: preview }));
+            }
+
+            container.append(item);
+        }
     }
 
-    for (const note of notes) {
-        const active = note.portable_id === uiState.selectedNoteId;
-        const preview = plainText(note.content);
-        const item = el("button", {
+    if (uiState.hasMoreNotes) {
+        container.append(el("button", {
+            id: "load-more-notes",
             type: "button",
-            "data-note-id": note.portable_id,
-            "aria-current": active ? "true" : "false",
-            "aria-label": note.title || "Untitled note",
-            class: `block min-h-11 w-full rounded-lg border p-3 text-left focus-visible:outline-3 focus-visible:outline-offset-2 ${active ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-800"}`,
-            onclick: () => {
-                uiState.selectedNoteId = note.portable_id;
-                uiState.mobileView = "editor";
-                uiState.focusNoteId = note.portable_id;
-                uiState.focusEditorHeading = true;
-                renderAll();
-            },
-        });
-
-        const heading = el("div", { class: "flex items-center gap-2" });
-        heading.append(el("span", { class: "flex-1 truncate font-medium", text: note.title || "Untitled" }));
-
-        if (note.sync_state === "pending" || note.sync_state === "conflict") {
-            const dot = note.sync_state === "conflict" ? "bg-red-500" : "bg-amber-500";
-            heading.append(el("span", {
-                class: `h-2 w-2 shrink-0 rounded-full ${dot}`,
-                title: note.sync_state === "conflict" ? "Kept locally, server has a different version" : "Waiting to sync",
-            }));
-        }
-
-        item.append(heading);
-
-        if (preview) {
-            item.append(el("p", { class: "mt-1 truncate text-sm text-zinc-500", text: preview }));
-        }
-
-        container.append(item);
+            class: "min-h-11 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 focus-visible:outline-3 focus-visible:outline-offset-2 dark:border-zinc-700 dark:hover:bg-zinc-800",
+            text: "Load more",
+            onclick: loadMoreLocalNotes,
+        }));
     }
 
     if (uiState.focusNoteId && uiState.mobileView === "list") {
@@ -1279,10 +1625,17 @@ async function renderList() {
         uiState.focusNoteId = null;
     }
 
+    if (uiState.focusLoadMore) {
+        document.getElementById("load-more-notes")?.focus();
+        uiState.focusLoadMore = false;
+    }
+
     if (uiState.focusListHeading) {
         document.getElementById("note-list-heading")?.focus();
         uiState.focusListHeading = false;
     }
+
+    renderListStatus();
 }
 
 function backToNoteList() {
@@ -1553,6 +1906,7 @@ async function captureThought() {
         user_id: runtime.userId,
         folder_portable_id: null,
         title: parsed.title,
+        title_key: titleKeyFor(parsed.title),
         content: parsed.content,
         version: 0,
         deleted_at: null,
@@ -1575,7 +1929,8 @@ async function captureThought() {
     uiState.selectedNoteId = portableId;
     uiState.mobileView = "editor";
     uiState.focusEditorHeading = true;
-    renderAll();
+    await resetOfflineList({ focusHeading: false });
+    await renderAll();
     syncNow();
 }
 
@@ -1654,6 +2009,14 @@ function mountShell() {
                             class: "mb-2 text-lg font-semibold focus:outline-none",
                             text: "Notes",
                         }),
+                        el("p", {
+                            id: "notes-list-status",
+                            class: "sr-only",
+                            role: "status",
+                            "aria-live": "polite",
+                            "aria-atomic": "true",
+                            "data-status-message-id": "0",
+                        }),
                         el("div", { id: "note-list", class: "space-y-2 lg:max-h-[70vh] lg:overflow-auto" }),
                     ]),
                     el("div", { id: "editor-panel", class: "min-w-0" }),
@@ -1667,16 +2030,29 @@ function mountShell() {
         uiState.search = search.value;
         uiState.mobileView = "list";
         updateMobileView();
-        renderList();
+
+        if (searchTimeout !== null) {
+            clearTimeout(searchTimeout);
+        }
+
+        searchTimeout = setTimeout(async () => {
+            searchTimeout = null;
+            await resetOfflineList({ focusHeading: false });
+            await renderAll();
+        }, 200);
     });
 
     const sort = document.getElementById("note-sort");
     sort.value = uiState.sort;
-    sort.addEventListener("change", () => {
+    sort.addEventListener("change", async () => {
         uiState.sort = sort.value;
         uiState.mobileView = "list";
         updateMobileView();
-        renderList();
+        if (searchTimeout !== null) {
+            clearTimeout(searchTimeout);
+        }
+        await resetOfflineList();
+        await renderAll();
     });
 }
 

@@ -32,6 +32,12 @@ class Note extends Model
         'version' => 1,
     ];
 
+    public function setTitleAttribute(string $title): void
+    {
+        $this->attributes['title'] = $title;
+        $this->attributes['title_key'] = Folder::nameKeyFor($title);
+    }
+
     protected function casts(): array
     {
         return [
