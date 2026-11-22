@@ -138,7 +138,7 @@ Keep browsing and searching comfortable as your collection becomes larger.
   - [x] Run the focused and full regression suites (AC-11)
 - [ ] Verify it: `/check verify performance as notes grow`
 spec [0007](../specs/0007-performance-as-notes-grow/index.md)
-Code in `database/migrations/2026_11_21_143804_add_title_key_and_read_indexes_to_notes_table.php`, `app/Models/Note.php`, `app/Http/Controllers/SyncController.php`, `resources/views/components/notes/⚡index.blade.php`, `resources/js/offline-app.js`, and `tests/Feature/NotesListPerformanceTest.php`.
+Code in `database/migrations/2026_11_21_143804_add_title_key_and_read_indexes_to_notes_table.php`, `app/Models/Note.php`, `app/Http/Controllers/SyncController.php`, `resources/views/components/notes/⚡index.blade.php`, `resources/js/offline-app.js`, `tests/Feature/NotesListPerformanceTest.php`, and `tests/Feature/NotesTest.php`.
 
 ## Deferred
 

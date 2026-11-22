@@ -3,6 +3,7 @@
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -29,6 +30,11 @@ function notesTestTmpDisk(): void
         'root' => $root.'/livewire-tmp',
         'throw' => false,
     ]);
+}
+
+function encodeNotesTestCursor(array $cursor): string
+{
+    return rtrim(strtr(base64_encode(json_encode($cursor, JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
 }
 
 test('saves note edits with content and folder', function () {
@@ -633,6 +639,107 @@ test('[AC-2, AC-3] pages duplicate titles in both directions with stable tie bre
         ->assertDontSee('Load more');
 });
 
+test('[AC-2] resumes paging without repeats after insertions and deletions between loads', function () {
+    $user = User::factory()->create();
+    $timestamp = now()->subHours(2);
+    $notes = collect();
+
+    for ($index = 0; $index < 80; $index++) {
+        $note = $user->notes()->create(['title' => 'Paging note '.$index, 'content' => '<p>Body</p>']);
+        $note->forceFill(['updated_at' => $timestamp])->saveQuietly();
+        $notes->push($note);
+    }
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('notes.index');
+    $firstPageIds = collect($component->get('noteRows'))->pluck('id')->all();
+    $anchorId = (int) collect($component->get('noteRows'))->last()['id'];
+    $deletedFromFirstPageId = (int) $firstPageIds[10];
+    $deletedFromSecondPageId = (int) DB::table('notes')
+        ->where('user_id', $user->id)
+        ->where('id', '<', $anchorId)
+        ->orderByDesc('id')
+        ->value('id');
+
+    $insertedNote = $user->notes()->create(['title' => 'Inserted between pages', 'content' => '<p>Body</p>']);
+    $insertedNote->forceFill(['updated_at' => $timestamp->copy()->subMinute()])->saveQuietly();
+
+    $user->notes()->whereKey($deletedFromFirstPageId)->delete();
+    $user->notes()->whereKey($deletedFromSecondPageId)->delete();
+
+    $component->call('loadMoreNotes');
+
+    $loadedIds = collect($component->get('noteRows'))->pluck('id')->all();
+    $secondPageIds = array_slice($loadedIds, count($firstPageIds));
+
+    expect($loadedIds)->toHaveCount(80)
+        ->and($secondPageIds)->toContain($insertedNote->id)
+        ->not->toContain($deletedFromFirstPageId, $deletedFromSecondPageId)
+        ->and(array_intersect($firstPageIds, $secondPageIds))->toBe([]);
+});
+
+test('[AC-2] returns a versioned cursor for the active sort and filter', function () {
+    $user = User::factory()->create();
+    $folder = $user->folders()->create(['name' => 'Cursor folder']);
+
+    for ($index = 0; $index < 51; $index++) {
+        $user->notes()->create([
+            'title' => 'Title '.sprintf('%03d', $index),
+            'content' => '<p>Body</p>',
+            'folder_id' => $folder->id,
+        ]);
+    }
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('notes.index')
+        ->call('selectFolder', $folder->id)
+        ->set('sortBy', 'title_asc');
+    $cursor = $component->get('notesCursor');
+    $decoded = json_decode((string) base64_decode(strtr($cursor, '-_', '+/'), true), true, 512, JSON_THROW_ON_ERROR);
+    $lastRow = collect($component->get('noteRows'))->last();
+    $lastNote = $user->notes()->findOrFail($lastRow['id']);
+
+    expect($cursor)->toMatch('/^[A-Za-z0-9_-]+$/')
+        ->and($decoded['v'])->toBe(1)
+        ->and($decoded['sort'])->toBe('title_asc')
+        ->and($decoded['filter'])->toBe(['search' => '', 'folder_id' => $folder->id, 'trash' => false])
+        ->and($decoded['key'])->toBe($lastNote->title_key)
+        ->and($decoded['anchor'])->toBe($lastNote->portable_id);
+});
+
+dataset('invalid note list cursor mutations', [
+    'wrong version' => fn (array $cursor): array => [...$cursor, 'v' => 2],
+    'wrong sort' => fn (array $cursor): array => [...$cursor, 'sort' => 'oldest'],
+    'wrong filter' => fn (array $cursor): array => [...$cursor, 'filter' => ['search' => 'needle', 'folder_id' => null, 'trash' => false]],
+    'missing anchor' => fn (array $cursor): array => [...$cursor, 'anchor' => (string) Str::uuid()],
+]);
+
+test('[AC-8] restarts paging for invalid cursors with a fixed status message', function (callable $mutateCursor) {
+    $user = User::factory()->create();
+
+    for ($index = 0; $index < 61; $index++) {
+        $user->notes()->create(['title' => 'Cursor note '.$index, 'content' => '<p>Body</p>']);
+    }
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('notes.index');
+    $firstPageRows = $component->get('noteRows');
+    $cursor = $component->get('notesCursor');
+    $decoded = json_decode((string) base64_decode(strtr($cursor, '-_', '+/'), true), true, 512, JSON_THROW_ON_ERROR);
+    $invalidCursor = encodeNotesTestCursor($mutateCursor($decoded));
+
+    $component->set('notesCursor', $invalidCursor)
+        ->call('loadMoreNotes')
+        ->assertSet('noteRows', $firstPageRows)
+        ->assertSet('notesCursor', $cursor)
+        ->assertSet('listStatusMessage', 'The note list was refreshed because its page was no longer valid.')
+        ->assertSet('listMessageId', 1)
+        ->assertDispatched('focus-target', fn (string $event, array $params): bool => $params['id'] === 'note-list-heading');
+})->with('invalid note list cursor mutations');
+
 test('[AC-5] clears the editor when a committed search excludes its selected note', function () {
     $user = User::factory()->create();
     $note = $user->notes()->create(['title' => 'Keep this note', 'content' => '<p>Draft</p>']);
@@ -696,6 +803,92 @@ test('[AC-9] reads a bounded content preview for the note list', function () {
 
     expect($listQueries)->toHaveCount(1)
         ->and($listQueries[0])->toContain('limit 51');
+});
+
+test('[AC-10] guards the notes list query against unbounded reads and N plus one patterns', function () {
+    $user = User::factory()->create();
+
+    for ($index = 0; $index < 51; $index++) {
+        $user->notes()->create([
+            'title' => 'Guard note '.$index,
+            'content' => str_repeat('x', 3000),
+        ]);
+    }
+
+    $listQueries = [];
+
+    DB::listen(function (QueryExecuted $query) use (&$listQueries): void {
+        $sql = strtolower($query->sql);
+
+        if (str_contains($sql, 'substr(notes.content, 1, 2000)')) {
+            $listQueries[] = $sql;
+        }
+    });
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index');
+
+    expect($listQueries)->toHaveCount(1)
+        ->and($listQueries[0])->toContain('limit 51')
+        ->toContain('substr(notes.content, 1, 2000) as content')
+        ->not->toContain('"notes"."content"');
+});
+
+test('[AC-4] keeps the note list and cursor unchanged when loading more notes fails', function () {
+    $user = User::factory()->create();
+
+    for ($index = 0; $index < 110; $index++) {
+        $user->notes()->create([
+            'title' => 'Load more note '.$index,
+            'content' => '<p>Body</p>',
+        ]);
+    }
+
+    $selectedNote = $user->notes()->firstOrFail();
+    $this->actingAs($user);
+
+    $component = Livewire::test('notes.index')
+        ->call('selectNote', $selectedNote->id);
+
+    $noteRows = $component->get('noteRows');
+    $notesCursor = $component->get('notesCursor');
+    $selectedNoteId = $component->get('selectedNoteId');
+    $statusMessageId = $component->get('listMessageId');
+
+    expect($notesCursor)->not->toBeNull();
+
+    $failNextListQuery = true;
+
+    DB::listen(function (QueryExecuted $query) use (&$failNextListQuery): void {
+        if (! $failNextListQuery || ! str_contains(strtolower($query->sql), 'substr(notes.content, 1, 2000)')) {
+            return;
+        }
+
+        $failNextListQuery = false;
+
+        throw new QueryException(
+            $query->connectionName,
+            $query->sql,
+            $query->bindings,
+            new RuntimeException('Forced list query failure.'),
+        );
+    });
+
+    $component->call('loadMoreNotes')
+        ->assertSet('noteRows', $noteRows)
+        ->assertSet('notesCursor', $notesCursor)
+        ->assertSet('selectedNoteId', $selectedNoteId)
+        ->assertSet('listStatusMessage', 'Could not load more notes. Try again.')
+        ->assertSet('listMessageId', $statusMessageId + 1);
+
+    expect($failNextListQuery)->toBeFalse();
+
+    $component->call('loadMoreNotes')
+        ->assertSet('listStatusMessage', '50 notes loaded.')
+        ->assertSet('listMessageId', $statusMessageId + 2);
+
+    expect($component->get('noteRows'))->toHaveCount(100);
 });
 
 test('[AC-7] backfills normalized note title keys across chunk boundaries and adds read indexes', function () {

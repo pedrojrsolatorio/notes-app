@@ -81,7 +81,7 @@ Run this on a machine with PHP 8.3, Node 22, SQLite, and a browser for the `/not
 
 ## Results
 
-Pending.
+The two saved regression commands passed on 2026-11-22 (2 tests, 14 assertions). The remaining browser and acceptance checks are still pending.
 
 ## Current implementation check
 
@@ -104,3 +104,15 @@ Recorded browser p95 results were 28.6 ms for first page, 14.8 ms for Load more,
 9. [ ] Confirm status text contains only fixed strings with counts and that each load or sync refresh changes the status message id once. Advance the offline sync revision while on a later page and confirm the list resets and announces once (AC-4, AC-6, AC-8).
 10. [ ] Apply the migration to representative data. Confirm the nullable 510-character key, four read indexes, deterministic 500-row backfill, and absence of new tables or uniqueness rules (AC-7).
 11. [ ] Run focused and full regression suites. Confirm reminder fields remain outside offline sync and local note records (AC-11).
+
+## Saved regression commands
+
+_Added on 2026-11-22 from /develop. Both tests are durable checks in `tests/Feature/NotesTest.php`._
+
+- [x] `php artisan test --compact --filter="guards the notes list query" tests/Feature/NotesTest.php` passes. It proves one list query, `limit 51`, the 2,000 character preview prefix, and no full body selection (AC-10).
+- [x] `php artisan test --compact --filter="keeps the note list and cursor unchanged" tests/Feature/NotesTest.php` passes. It proves rows, cursor, and selection stay unchanged after a forced failure, the failure is announced once, and retry succeeds (AC-4).
+
+## Acceptance-criteria coverage
+
+- AC-4 is covered by the forced failure command above.
+- AC-10 is covered by the query guard command above.
