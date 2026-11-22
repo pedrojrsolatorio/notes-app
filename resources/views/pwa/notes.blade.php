@@ -17,7 +17,7 @@
 
     @vite(['resources/css/app.css', 'resources/js/offline-app.js'])
 </head>
-<body class="min-h-screen bg-white dark:bg-zinc-800" data-user-id="{{ auth()->id() }}">
+<body class="min-h-screen bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100" data-user-id="{{ auth()->id() }}">
     <div id="offline-app">
         <div class="flex min-h-screen items-center justify-center p-6 text-sm text-zinc-500">
             Loading your notes…
