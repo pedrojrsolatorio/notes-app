@@ -140,6 +140,8 @@ export function createTiptapComponent(content = "", options = {}) {
                 fontSize: this.getEffectiveFontSize(),
                 color: this.getEffectiveColor(),
             };
+
+            options.onActiveFormatsChange?.(this.activeFormats);
         },
 
         toggleBold() {
@@ -184,6 +186,10 @@ export function createTiptapComponent(content = "", options = {}) {
 
         getContent() {
             return editor?.getHTML() ?? "";
+        },
+
+        focus() {
+            editor?.commands.focus();
         },
 
         isActive(format) {

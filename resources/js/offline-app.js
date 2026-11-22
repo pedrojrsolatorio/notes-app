@@ -1,5 +1,6 @@
 import Dexie from "dexie";
-import { createTiptapEditor } from "./tiptap.js";
+import { resolveIdentityForSync } from "./offline-identity.js";
+import { createTiptapComponent } from "./tiptap.js";
 
 // ===========================================================================
 // Identity
@@ -231,6 +232,7 @@ const runtime = {
     online: navigator.onLine,
     syncing: false,
     needsSignIn: false,
+    accountChanged: false,
     lastError: null,
     nextRetryAt: 0,
     notices: [],
@@ -545,12 +547,49 @@ function backoffDelay(attempts) {
     return Math.min(60_000, 1_000 * 2 ** Math.min(attempts, 6));
 }
 
-async function syncNow({ manual = false } = {}) {
-    if (runtime.syncing || runtime.userId === null || runtime.db === null) {
+async function verifyCurrentUser() {
+    const decision = resolveIdentityForSync({
+        currentUserId: runtime.userId,
+        probedUserId: await fetchPageUserId(),
+        online: true,
+    });
+
+    if (decision.status === "offline") {
+        return true;
+    }
+
+    if (decision.status === "unknown") {
+        setRuntime({ lastError: "Could not confirm the signed in account." });
+        return false;
+    }
+
+    if (decision.status === "signed-out") {
+        forgetUserId();
+        setRuntime({ needsSignIn: true, accountChanged: false, lastError: null });
+        renderSignIn();
+        return false;
+    }
+
+    if (decision.status === "changed") {
+        setRuntime({ needsSignIn: false, accountChanged: true, lastError: null });
+        notice("The signed in account changed. Reload before syncing.");
+        return false;
+    }
+
+    setRuntime({ needsSignIn: false, accountChanged: false, lastError: null });
+    return true;
+}
+
+async function syncNow({ manual = false, verifyIdentity = true } = {}) {
+    if (runtime.syncing || runtime.accountChanged || runtime.userId === null || runtime.db === null) {
         return;
     }
 
     if (!runtime.online || (!manual && Date.now() < runtime.nextRetryAt)) {
+        return;
+    }
+
+    if (verifyIdentity && ! await verifyCurrentUser()) {
         return;
     }
 
@@ -955,6 +994,7 @@ const uiState = {
     pendingListStatusMessage: null,
     lastRefreshRevision: null,
     editor: null,
+    editorToolbar: null,
     editorNoteId: null,
     editorMount: null,
     editorDeletedAt: null,
@@ -996,6 +1036,10 @@ function el(tag, attrs = {}, children = []) {
 }
 
 function statusText() {
+    if (runtime.accountChanged) {
+        return "Account changed";
+    }
+
     if (runtime.needsSignIn) {
         return "Needs sign in";
     }
@@ -1068,9 +1112,16 @@ async function renderStatus() {
         retry = el("button", {
             id: "status-sync-now",
             type: "button",
-            class: "min-h-11 rounded border px-3 py-1 text-sm font-medium",
+            class: "min-h-11 rounded border px-3 py-1 text-sm font-medium disabled:opacity-50",
             text: "Sync now",
-            onclick: () => syncNow({ manual: true }),
+            onclick: () => {
+                if (runtime.accountChanged) {
+                    window.location.assign("/app");
+                    return;
+                }
+
+                syncNow({ manual: true });
+            },
         });
 
         const summary = el("div", {
@@ -1085,13 +1136,15 @@ async function renderStatus() {
         bar.append(summary, signIn, retry);
     }
 
-    const dotColor = runtime.needsSignIn
-        ? "bg-red-500"
-        : runtime.syncing
-            ? "bg-blue-500"
-            : runtime.online
-                ? "bg-emerald-500"
-                : "bg-zinc-400";
+    const dotColor = runtime.accountChanged
+        ? "bg-amber-600"
+        : runtime.needsSignIn
+            ? "bg-red-600"
+            : runtime.syncing
+                ? "bg-blue-500"
+                : runtime.online
+                    ? "bg-emerald-600"
+                    : "bg-amber-600";
 
     dot.className = `inline-block h-2 w-2 rounded-full ${dotColor}`;
 
@@ -1114,7 +1167,12 @@ async function renderStatus() {
         pendingText.textContent = nextPending;
     }
 
-    retry.textContent = runtime.syncing ? "Syncing…" : "Sync now";
+    if (runtime.accountChanged) {
+        retry.textContent = "Reload";
+    } else {
+        retry.textContent = runtime.syncing ? "Syncing…" : "Sync now";
+    }
+
     retry.disabled = runtime.syncing;
 
 }
@@ -1453,9 +1511,30 @@ async function renderFolders(folders) {
 
     container.replaceChildren();
 
+    const newFolder = el("button", {
+        type: "button",
+        class: "inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800",
+        text: "+ New folder",
+        onclick: async () => {
+            const name = window.prompt("Folder name");
+            if (name && name.trim() !== "") {
+                uiState.folderId = await createFolder(name.trim());
+                uiState.mobileView = "list";
+                await resetOfflineList({ focusHeading: false });
+                await renderAll();
+            }
+        },
+    });
+
+    container.append(el("div", { class: "flex items-center justify-between gap-2" }, [
+        el("h2", { id: "folders-heading", class: "text-lg font-semibold", text: "Folders" }),
+        newFolder,
+    ]));
+
     const item = (label, active, onclick) => el("button", {
         type: "button",
-        class: `block min-h-11 w-full rounded-lg px-3 py-2 text-left text-sm ${active ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`,
+        ...(active ? { "aria-current": "page" } : {}),
+        class: `block min-h-11 w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800" : ""}`.trim(),
         text: label,
         onclick,
     });
@@ -1489,7 +1568,7 @@ async function renderFolders(folders) {
 
         const rename = el("button", {
             type: "button",
-            class: "min-h-11 min-w-11 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800",
+            class: "min-h-11 rounded px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800",
             text: "Rename",
             onclick: async () => {
                 const name = window.prompt("Folder name", folder.name);
@@ -1502,7 +1581,7 @@ async function renderFolders(folders) {
 
         const remove = el("button", {
             type: "button",
-            class: "min-h-11 min-w-11 rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950",
+            class: "min-h-11 rounded px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950",
             text: "Delete",
             onclick: async () => {
                 if (window.confirm(`Delete folder "${folder.name}"? Its notes stay in All Notes.`)) {
@@ -1531,26 +1610,15 @@ async function renderFolders(folders) {
         await renderAll();
     }));
 
-    const newFolder = el("button", {
-        type: "button",
-        class: "mt-2 min-h-11 w-full rounded-lg border px-3 py-2 text-sm font-medium",
-        text: "+ New folder",
-        onclick: async () => {
-            const name = window.prompt("Folder name");
-            if (name && name.trim() !== "") {
-                uiState.folderId = await createFolder(name.trim());
-                uiState.mobileView = "list";
-                await resetOfflineList({ focusHeading: false });
-                await renderAll();
-            }
-        },
-    });
-
-    container.append(newFolder);
 }
 
 async function renderList() {
     const container = document.getElementById("note-list");
+    const heading = document.getElementById("note-list-heading");
+
+    if (heading) {
+        heading.textContent = uiState.view === "trash" ? "Trash" : "Notes";
+    }
 
     if (!container || !runtime.db) {
         return;
@@ -1577,7 +1645,7 @@ async function renderList() {
                 "data-note-id": note.portable_id,
                 "aria-current": active ? "true" : "false",
                 "aria-label": note.title || "Untitled note",
-                class: `block min-h-11 w-full rounded-lg border p-3 text-left focus-visible:outline-3 focus-visible:outline-offset-2 ${active ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-800"}`,
+                class: "block min-h-11 w-full rounded-lg border p-4 text-left focus-visible:outline-3 focus-visible:outline-offset-4",
                 onclick: () => {
                     uiState.selectedNoteId = note.portable_id;
                     uiState.mobileView = "editor";
@@ -1588,10 +1656,10 @@ async function renderList() {
             });
 
             const heading = el("div", { class: "flex items-center gap-2" });
-            heading.append(el("span", { class: "flex-1 truncate font-medium", text: note.title || "Untitled" }));
+            heading.append(el("span", { class: "flex-1 truncate font-semibold", text: note.title || "Untitled" }));
 
             if (note.sync_state === "pending" || note.sync_state === "conflict") {
-                const dot = note.sync_state === "conflict" ? "bg-red-500" : "bg-amber-500";
+                const dot = note.sync_state === "conflict" ? "bg-red-600" : "bg-amber-600";
                 heading.append(el("span", {
                     class: `h-2 w-2 shrink-0 rounded-full ${dot}`,
                     title: note.sync_state === "conflict" ? "Kept locally, server has a different version" : "Waiting to sync",
@@ -1612,7 +1680,7 @@ async function renderList() {
         container.append(el("button", {
             id: "load-more-notes",
             type: "button",
-            class: "min-h-11 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 focus-visible:outline-3 focus-visible:outline-offset-2 dark:border-zinc-700 dark:hover:bg-zinc-800",
+            class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-50",
             text: "Load more",
             onclick: loadMoreLocalNotes,
         }));
@@ -1662,6 +1730,394 @@ function showEditorError(message) {
     }
 }
 
+const toolbarButtonClass = "inline-flex min-h-6 min-w-6 items-center justify-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
+const toolbarMenuButtonClass = "inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
+const toolbarMenuItemClass = "block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
+const toolbarMenuPanelClass = "absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border p-1 shadow-lg";
+
+function toolbarAlignmentIcon(paths) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+
+    svg.setAttribute("class", "size-4");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.25");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("aria-hidden", "true");
+
+    for (const pathData of paths) {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+        path.setAttribute("d", pathData);
+        svg.append(path);
+    }
+
+    return svg;
+}
+
+function createTiptapToolbar(component) {
+    const help = el("p", {
+        id: "note-toolbar-help",
+        class: "mb-1 text-xs text-zinc-500 dark:text-zinc-400",
+        text: "Formatting toolbar. Use Tab to move between controls; pressed buttons are active formats.",
+    });
+    const toolbar = el("div", {
+        class: "mb-2 rounded-lg border p-1",
+        role: "toolbar",
+        "aria-label": "Formatting",
+        "aria-describedby": "note-toolbar-help",
+    });
+    const row = el("div", { class: "flex flex-wrap items-center gap-1" });
+    const pressedResolvers = new Map();
+    const menuClosers = [];
+    const tableOnlyNodes = [];
+    const tableMenuWrappers = [];
+    const fontSizeControls = [];
+    const fontColorControls = [];
+
+    toolbar.append(row);
+
+    const closeMenus = () => {
+        for (const close of menuClosers) {
+            close();
+        }
+    };
+
+    const call = (method, ...args) => () => component[method](...args);
+
+    const addButton = (parent, label, action, options = {}) => {
+        const button = el("button", {
+            type: "button",
+            class: `${toolbarButtonClass} ${options.class ?? ""}`.trim(),
+            "aria-label": label,
+            title: label,
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                action();
+                closeMenus();
+            },
+        }, [options.icon ?? options.glyph ?? label]);
+
+        if (options.pressed) {
+            button.setAttribute("aria-pressed", "false");
+            pressedResolvers.set(button, options.pressed);
+        } else if (options.format) {
+            button.setAttribute("aria-pressed", "false");
+            pressedResolvers.set(button, (formats) => Boolean(formats[options.format]));
+        }
+
+        parent.append(button);
+
+        return button;
+    };
+
+    const addMenuItem = (parent, item) => {
+        if (item.heading) {
+            const heading = el("p", {
+                class: "mt-1 px-3 py-2 text-xs font-medium text-zinc-500",
+                text: item.label,
+            });
+
+            if (item.tableOnly) {
+                tableOnlyNodes.push(heading);
+            }
+
+            parent.append(heading);
+
+            return heading;
+        }
+
+        const button = el("button", {
+            type: "button",
+            class: `${toolbarMenuItemClass} ${item.class ?? ""}`.trim(),
+            text: item.label,
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                item.action();
+                closeMenus();
+            },
+        });
+
+        if (item.pressed) {
+            button.setAttribute("aria-pressed", "false");
+            pressedResolvers.set(button, item.pressed);
+        } else if (item.format) {
+            button.setAttribute("aria-pressed", "false");
+            pressedResolvers.set(button, (formats) => Boolean(formats[item.format]));
+        }
+
+        if (item.tableOnly) {
+            tableOnlyNodes.push(button);
+        }
+
+        parent.append(button);
+
+        return button;
+    };
+
+    const createMenu = (label, triggerText, items, extraClass = "") => {
+        const wrapper = el("div", { class: `relative ${extraClass}`.trim() });
+        const panel = el("div", {
+            class: `${toolbarMenuPanelClass} hidden`,
+            role: "group",
+            "aria-label": label,
+        });
+        const trigger = el("button", {
+            type: "button",
+            class: toolbarMenuButtonClass,
+            "aria-label": label,
+            title: label,
+            "aria-haspopup": "true",
+            "aria-expanded": "false",
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                const shouldOpen = panel.classList.contains("hidden");
+
+                closeMenus();
+                panel.classList.toggle("hidden", !shouldOpen);
+                trigger.setAttribute("aria-expanded", String(shouldOpen));
+            },
+        }, [triggerText]);
+
+        menuClosers.push(() => {
+            panel.classList.add("hidden");
+            trigger.setAttribute("aria-expanded", "false");
+        });
+
+        for (const item of items) {
+            addMenuItem(panel, item);
+        }
+
+        wrapper.append(trigger, panel);
+        row.append(wrapper);
+
+        if (extraClass.includes("max-md:hidden")) {
+            tableMenuWrappers.push(wrapper);
+        }
+
+        return wrapper;
+    };
+
+    const addFontSizeControl = (extraClass = "") => {
+        const wrapper = el("div", { class: extraClass });
+        const select = el("select", {
+            "aria-label": "Font size",
+            class: "min-h-6 rounded border border-zinc-300 bg-white px-2 py-1 text-sm",
+            onchange: (event) => component.setFontSize(event.target.value),
+        }, [
+            el("option", { value: "mixed", disabled: "disabled", text: "—" }),
+            el("option", { value: "12px", text: "12" }),
+            el("option", { value: "14px", text: "14" }),
+            el("option", { value: "16px", text: "16" }),
+            el("option", { value: "18px", text: "18" }),
+            el("option", { value: "20px", text: "20" }),
+            el("option", { value: "24px", text: "24" }),
+            el("option", { value: "28px", text: "28" }),
+            el("option", { value: "32px", text: "32" }),
+        ]);
+
+        fontSizeControls.push(select);
+        wrapper.append(select);
+        row.append(wrapper);
+
+        return wrapper;
+    };
+
+    const addFontColorControl = (extraClass = "", compact = false) => {
+        const wrapper = el("div", { class: extraClass });
+        const input = el("input", {
+            id: compact ? "note-font-color" : "more-font-color",
+            type: "color",
+            "aria-label": "Font color",
+            class: compact
+                ? "h-6 w-8 cursor-pointer rounded border border-zinc-300 bg-white p-0.5"
+                : "mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-300 bg-white p-1",
+            oninput: (event) => component.setColor(event.target.value),
+        });
+
+        fontColorControls.push(input);
+        wrapper.append(input);
+        row.append(wrapper);
+
+        return wrapper;
+    };
+
+    addButton(row, "Bold", call("toggleBold"), { glyph: "B", class: "font-bold", format: "bold" });
+    addButton(row, "Italic", call("toggleItalic"), { glyph: "I", class: "italic", format: "italic" });
+    addButton(row, "Underline", call("toggleUnderline"), { glyph: "U", class: "underline", format: "underline" });
+    addButton(row, "Strikethrough", call("toggleStrike"), { glyph: "S", class: "line-through", format: "strike" });
+
+    addButton(row, "Code block", call("toggleCodeBlock"), { glyph: "Code", class: "max-md:hidden", format: "codeBlock" });
+    addButton(row, "Bullet list", call("toggleBulletList"), { glyph: "Bullets", class: "max-md:hidden", format: "bulletList" });
+    addButton(row, "Numbered list", call("toggleOrderedList"), { glyph: "Numbers", class: "max-md:hidden", format: "orderedList" });
+    addButton(row, "Task list", call("toggleTaskList"), { glyph: "Tasks", class: "max-md:hidden", format: "taskList" });
+
+    addButton(row, "Paragraph", call("setParagraph"), { glyph: "P", class: "max-md:hidden", format: "paragraph" });
+    addButton(row, "Heading 1", call("setHeading", 1), { glyph: "H1", class: "max-md:hidden font-bold", format: "heading1" });
+    addButton(row, "Heading 2", call("setHeading", 2), { glyph: "H2", class: "max-md:hidden font-bold", format: "heading2" });
+    addButton(row, "Heading 3", call("setHeading", 3), { glyph: "H3", class: "max-md:hidden font-bold", format: "heading3" });
+
+    addFontSizeControl("max-md:hidden");
+    addFontColorControl("max-md:hidden", true);
+
+    addButton(row, "Highlight", call("toggleHighlight"), { glyph: "Mark", class: "max-md:hidden", format: "highlight" });
+    addButton(row, "Link", call("setLink"), { glyph: "Link", class: "max-md:hidden", format: "link" });
+
+    addButton(row, "Align left", call("setTextAlign", "left"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M2 6.5h8", "M2 9.5h12", "M2 12.5h8"]), class: "max-md:hidden", format: "alignLeft" });
+    addButton(row, "Align center", call("setTextAlign", "center"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M4 6.5h8", "M2 9.5h12", "M4 12.5h8"]), class: "max-md:hidden", format: "alignCenter" });
+    addButton(row, "Align right", call("setTextAlign", "right"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M6 6.5h8", "M2 9.5h12", "M6 12.5h8"]), class: "max-md:hidden", format: "alignRight" });
+    addButton(row, "Justify", call("setTextAlign", "justify"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M2 6.5h12", "M2 9.5h12", "M2 12.5h12"]), class: "max-md:hidden", format: "alignJustify" });
+
+    addButton(row, "Insert table", call("insertTable"), { glyph: "Table", class: "max-md:hidden" });
+
+    createMenu("Table options", "Table ▾", [
+        { label: "Add row above", action: call("addTableRowBefore") },
+        { label: "Add row below", action: call("addTableRowAfter") },
+        { label: "Delete row", action: call("deleteTableRow") },
+        { label: "Add column left", action: call("addTableColumnBefore") },
+        { label: "Add column right", action: call("addTableColumnAfter") },
+        { label: "Delete column", action: call("deleteTableColumn") },
+        { label: "Delete table", action: call("deleteTable"), class: "text-red-600 hover:bg-red-50 dark:hover:bg-red-950" },
+    ], "max-md:hidden");
+
+    createMenu("Table width", "Width ▾", [
+        { label: "Narrow (50%)", action: call("setTableWidth", 50), pressed: (formats) => formats.tableWidth === "narrow" },
+        { label: "Medium (75%)", action: call("setTableWidth", 75), pressed: (formats) => formats.tableWidth === "medium" },
+        { label: "Wide (100%)", action: call("setTableWidth", 100), pressed: (formats) => formats.tableWidth === "wide" },
+        { label: "Reset width", action: call("setTableWidth", null) },
+    ], "max-md:hidden");
+
+    createMenu("More formatting", "More", [
+        { label: "Bullet list", action: call("toggleBulletList"), format: "bulletList" },
+        { label: "Numbered list", action: call("toggleOrderedList"), format: "orderedList" },
+        { label: "Task list", action: call("toggleTaskList"), format: "taskList" },
+        { label: "Code block", action: call("toggleCodeBlock"), format: "codeBlock" },
+        { label: "Paragraph", action: call("setParagraph"), format: "paragraph" },
+        { label: "Heading 1", action: call("setHeading", 1), class: "font-bold", format: "heading1" },
+        { label: "Heading 2", action: call("setHeading", 2), class: "font-bold", format: "heading2" },
+        { label: "Heading 3", action: call("setHeading", 3), class: "font-bold", format: "heading3" },
+        { label: "Font size", heading: true },
+        { label: "Font color", heading: true },
+        { label: "Highlight", action: call("toggleHighlight"), format: "highlight" },
+        { label: "Link", action: call("setLink"), format: "link" },
+        { label: "Align left", action: call("setTextAlign", "left"), format: "alignLeft" },
+        { label: "Align center", action: call("setTextAlign", "center"), format: "alignCenter" },
+        { label: "Align right", action: call("setTextAlign", "right"), format: "alignRight" },
+        { label: "Justify", action: call("setTextAlign", "justify"), format: "alignJustify" },
+        { label: "Insert table", action: call("insertTable") },
+        { label: "Table options", heading: true, tableOnly: true },
+        { label: "Add row above", action: call("addTableRowBefore"), tableOnly: true },
+        { label: "Add row below", action: call("addTableRowAfter"), tableOnly: true },
+        { label: "Delete row", action: call("deleteTableRow"), tableOnly: true },
+        { label: "Add column left", action: call("addTableColumnBefore"), tableOnly: true },
+        { label: "Add column right", action: call("addTableColumnAfter"), tableOnly: true },
+        { label: "Delete column", action: call("deleteTableColumn"), tableOnly: true },
+        { label: "Delete table", action: call("deleteTable"), tableOnly: true, class: "text-red-600 hover:bg-red-50 dark:hover:bg-red-950" },
+        { label: "Table width", heading: true, tableOnly: true },
+        { label: "Narrow (50%)", action: call("setTableWidth", 50), tableOnly: true, pressed: (formats) => formats.tableWidth === "narrow" },
+        { label: "Medium (75%)", action: call("setTableWidth", 75), tableOnly: true, pressed: (formats) => formats.tableWidth === "medium" },
+        { label: "Wide (100%)", action: call("setTableWidth", 100), tableOnly: true, pressed: (formats) => formats.tableWidth === "wide" },
+        { label: "Reset width", action: call("setTableWidth", null), tableOnly: true },
+    ], "md:hidden");
+
+    const morePanel = row.querySelector('[aria-label="More formatting"][role="group"]');
+
+    if (morePanel) {
+        const moreFontSize = el("select", {
+            id: "more-font-size",
+            "aria-label": "Font size",
+            class: "mx-3 mb-2 min-h-11 rounded border border-zinc-300 bg-white px-2 py-1 text-sm",
+            onchange: (event) => component.setFontSize(event.target.value),
+        }, [
+            el("option", { value: "mixed", disabled: "disabled", text: "—" }),
+            el("option", { value: "12px", text: "12" }),
+            el("option", { value: "14px", text: "14" }),
+            el("option", { value: "16px", text: "16" }),
+            el("option", { value: "18px", text: "18" }),
+            el("option", { value: "20px", text: "20" }),
+            el("option", { value: "24px", text: "24" }),
+            el("option", { value: "28px", text: "28" }),
+            el("option", { value: "32px", text: "32" }),
+        ]);
+
+        const moreColor = el("input", {
+            id: "more-font-color",
+            type: "color",
+            "aria-label": "Font color",
+            class: "mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-300 bg-white p-1",
+            oninput: (event) => component.setColor(event.target.value),
+        });
+
+        fontSizeControls.push(moreFontSize);
+        fontColorControls.push(moreColor);
+        morePanel.querySelectorAll('p').forEach((heading) => {
+            if (heading.textContent === "Font size") {
+                heading.after(moreFontSize);
+            }
+
+            if (heading.textContent === "Font color") {
+                heading.after(moreColor);
+            }
+        });
+    }
+
+    const onPointerDown = (event) => {
+        if (!toolbar.contains(event.target)) {
+            closeMenus();
+        }
+    };
+
+    const onKeyDown = (event) => {
+        if (event.key === "Escape") {
+            closeMenus();
+        }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+
+    const update = (formats) => {
+        for (const [button, resolve] of pressedResolvers) {
+            button.setAttribute("aria-pressed", resolve(formats) ? "true" : "false");
+        }
+
+        for (const select of fontSizeControls) {
+            const validSize = Array.from(select.options).some((option) => option.value === formats.fontSize);
+
+            select.value = validSize ? formats.fontSize : "16px";
+        }
+
+        const color = /^#[0-9a-f]{6}$/i.test(String(formats.color)) ? formats.color : "#000000";
+
+        for (const input of fontColorControls) {
+            input.value = color;
+        }
+
+        for (const wrapper of tableMenuWrappers) {
+            wrapper.classList.toggle("hidden", !formats.table);
+        }
+
+        for (const node of tableOnlyNodes) {
+            node.classList.toggle("hidden", !formats.table);
+        }
+
+        if (!formats.table) {
+            closeMenus();
+        }
+    };
+
+    return {
+        element: el("div", {}, [help, toolbar]),
+        update,
+        destroy() {
+            document.removeEventListener("pointerdown", onPointerDown);
+            document.removeEventListener("keydown", onKeyDown);
+            closeMenus();
+        },
+    };
+}
+
 async function renderEditor() {
     const panel = document.getElementById("editor-panel");
 
@@ -1675,10 +2131,16 @@ async function renderEditor() {
         if (uiState.editor) {
             uiState.editor.destroy();
             uiState.editor = null;
-            uiState.editorNoteId = null;
-            uiState.editorMount = null;
-            uiState.editorDeletedAt = null;
         }
+
+        if (uiState.editorToolbar) {
+            uiState.editorToolbar.destroy();
+            uiState.editorToolbar = null;
+        }
+
+        uiState.editorNoteId = null;
+        uiState.editorMount = null;
+        uiState.editorDeletedAt = null;
 
         panel.replaceChildren(
             el("div", {
@@ -1701,11 +2163,22 @@ async function renderEditor() {
             uiState.editor.destroy();
         }
 
+        if (uiState.editorToolbar) {
+            uiState.editorToolbar.destroy();
+        }
+
+        const editor = createTiptapComponent(note.content ?? "", {
+            resizable: false,
+            label: "Note content",
+            onActiveFormatsChange: (formats) => uiState.editorToolbar?.update(formats),
+        });
+        const toolbar = createTiptapToolbar(editor);
+
         const titleInput = el("input", {
             id: "note-title",
             type: "text",
             required: "required",
-            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-lg font-semibold dark:bg-zinc-900 dark:border-zinc-800",
+            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-lg font-semibold",
             value: note.title,
             placeholder: "Title",
             "aria-describedby": "note-title-error",
@@ -1714,7 +2187,7 @@ async function renderEditor() {
 
         const folderSelect = el("select", {
             id: "note-folder",
-            class: "min-h-11 w-full rounded-lg border px-2 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
+            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-sm",
         });
 
         const titleError = el("p", {
@@ -1748,20 +2221,21 @@ async function renderEditor() {
                     el("label", { for: "note-folder", class: "block text-sm font-medium", text: "Folder" }),
                     folderSelect,
                 ]),
+                toolbar.element,
                 el("div", {
                     id: "note-editor",
-                    class: "min-h-[180px] rounded-lg border p-3 dark:border-zinc-800",
+                    class: "min-h-[180px] rounded-lg border",
                     "aria-label": "Note content",
                 }),
                 el("div", { class: "flex flex-wrap items-center gap-2" }, [
                     el("button", {
                         type: "button",
-                        class: "min-h-11 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
+                        class: "min-h-11 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50",
                         text: "Save",
                         onclick: async () => {
                             const title = document.getElementById("note-title").value;
                             const folderId = document.getElementById("note-folder").value || null;
-                            const content = uiState.editor ? uiState.editor.getHTML() : "";
+                            const content = uiState.editor ? uiState.editor.getContent() : "";
 
                             if (title.trim() === "") {
                                 showEditorError("A note needs a title.");
@@ -1776,13 +2250,13 @@ async function renderEditor() {
 
                             document.getElementById("note-title")?.removeAttribute("aria-invalid");
                             document.getElementById("note-title-error")?.classList.add("hidden");
-                            uiState.editor?.commands.focus();
+                            uiState.editor?.focus();
                         },
                     }),
                     note.deleted_at
                         ? el("button", {
                             type: "button",
-                            class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium",
+                            class: "min-h-11 rounded-lg border px-3 py-2 text-sm font-medium",
                             text: "Restore",
                             onclick: async () => {
                                 await restoreNote(note.portable_id);
@@ -1790,7 +2264,7 @@ async function renderEditor() {
                         })
                         : el("button", {
                             type: "button",
-                            class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium",
+                            class: "min-h-11 rounded-lg border px-3 py-2 text-sm font-medium",
                             text: "Move to Trash",
                             onclick: async () => {
                                 await trashNote(note.portable_id);
@@ -1799,7 +2273,7 @@ async function renderEditor() {
                     note.deleted_at
                         ? el("button", {
                             type: "button",
-                            class: "min-h-11 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600",
+                            class: "min-h-11 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white",
                             text: "Delete forever",
                             onclick: async () => {
                                 if (window.confirm("Delete this note forever?")) {
@@ -1833,11 +2307,10 @@ async function renderEditor() {
             select.append(option);
         }
 
-        uiState.editor = createTiptapEditor(
-            document.getElementById("note-editor"),
-            note.content ?? "",
-            { resizable: false, label: "Note content" },
-        );
+        uiState.editor = editor;
+        uiState.editorToolbar = toolbar;
+        uiState.editor.$refs = { editor: document.getElementById("note-editor") };
+        uiState.editor.init();
         uiState.editorMount = document.getElementById("note-editor");
         uiState.editorNoteId = note.portable_id;
         uiState.editorDeletedAt = note.deleted_at ?? null;
@@ -1942,25 +2415,25 @@ function mountShell() {
     root.replaceChildren(
         el("a", {
             href: "#main-content",
-            class: "fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0 dark:bg-white dark:text-black",
+            class: "fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0",
             text: "Skip to content",
         }),
-        el("div", { id: "offline-shell", class: "mx-auto flex min-h-screen max-w-6xl flex-col gap-4 p-4" }, [
+        el("div", { id: "offline-shell", class: "mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-6" }, [
             el("header", { class: "flex flex-wrap items-center justify-between gap-3" }, [
-                el("h1", { class: "text-xl font-bold", text: "Notes" }),
+                el("h1", { class: "text-2xl font-bold", text: "Notes" }),
                 el("div", { id: "status-bar", class: "flex flex-wrap items-center gap-3 text-sm" }),
             ]),
             el("div", { id: "status-notices", class: "flex flex-col gap-2", role: "status", "aria-live": "polite" }),
             el("div", { id: "update-banner", class: "hidden" }),
-            el("main", { id: "main-content", tabindex: "-1", class: "grid flex-1 gap-4 md:grid-cols-[220px_1fr]" }, [
-                el("aside", { class: "space-y-3", "aria-label": "Notes and folders" }, [
+            el("main", { id: "main-content", tabindex: "-1", class: "grid flex-1 gap-6 md:grid-cols-4" }, [
+                el("aside", { class: "space-y-2 lg:col-span-1", "aria-labelledby": "folders-heading" }, [
                     el("div", { class: "space-y-2" }, [
                         el("label", { for: "capture-text", class: "block text-sm font-medium", text: "Quick capture" }),
                         el("textarea", {
                             id: "capture-text",
                             rows: 3,
-                            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                            placeholder: "Capture a thought…",
+                            class: "min-h-11 w-full rounded-lg border px-4 py-2 text-sm",
+                            placeholder: "Capture a thought...",
                             "aria-keyshortcuts": "Alt+Shift+N",
                             "aria-describedby": "capture-help capture-error",
                             "aria-invalid": "false",
@@ -1969,46 +2442,50 @@ function mountShell() {
                         el("p", { id: "capture-error", role: "alert", class: "hidden text-sm text-red-600 dark:text-red-400" }),
                         el("button", {
                             type: "button",
-                            class: "min-h-11 w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
+                            class: "min-h-11 w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50",
                             text: "Capture",
                             onclick: captureThought,
                         }),
                     ]),
-                    el("div", { class: "space-y-1" }, [
-                        el("label", { for: "note-search", class: "block text-sm font-medium", text: "Search notes" }),
-                        el("input", {
-                            id: "note-search",
-                            type: "search",
-                            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                            placeholder: "Search notes…",
-                            value: uiState.search,
-                        }),
-                    ]),
-                    el("div", { class: "space-y-1" }, [
-                        el("label", { for: "note-sort", class: "block text-sm font-medium", text: "Sort by" }),
-                        el("select", {
-                            id: "note-sort",
-                            class: "min-h-11 w-full rounded-lg border px-2 py-1 text-sm dark:bg-zinc-900 dark:border-zinc-800",
-                        }, [
-                            el("option", { value: "newest", text: "Newest" }),
-                            el("option", { value: "oldest", text: "Oldest" }),
-                            el("option", { value: "title_az", text: "Title A to Z" }),
-                            el("option", { value: "title_za", text: "Title Z to A" }),
-                        ]),
-                    ]),
-                    el("nav", { id: "folder-list", class: "space-y-1", "aria-label": "Folders" }),
+                    el("nav", { id: "folder-list", class: "space-y-1" }),
                 ]),
                 el("section", {
-                    class: "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]",
+                    class: "min-w-0 md:col-span-3 lg:grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] lg:items-start lg:gap-6",
                     "aria-labelledby": "note-list-heading",
                 }, [
                     el("div", { id: "note-list-wrapper", "data-note-list": "", class: "min-w-0" }, [
-                        el("h2", {
-                            id: "note-list-heading",
-                            tabindex: "-1",
-                            class: "mb-2 text-lg font-semibold focus:outline-none",
-                            text: "Notes",
-                        }),
+                        el("div", { class: "mb-6 flex flex-wrap items-center justify-between gap-4" }, [
+                            el("h2", {
+                                id: "note-list-heading",
+                                tabindex: "-1",
+                                class: "text-2xl font-bold focus:outline-none",
+                                text: uiState.view === "trash" ? "Trash" : "Notes",
+                            }),
+                        ]),
+                        el("div", { class: "mb-6 grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]" }, [
+                            el("div", { class: "space-y-1" }, [
+                                el("label", { for: "note-search", class: "block text-sm font-medium", text: "Search notes" }),
+                                el("input", {
+                                    id: "note-search",
+                                    type: "search",
+                                    class: "min-h-11 w-full rounded-lg border px-4 py-2",
+                                    placeholder: "Search notes...",
+                                    value: uiState.search,
+                                }),
+                            ]),
+                            el("div", { class: "space-y-1" }, [
+                                el("label", { for: "note-sort", class: "block text-sm font-medium", text: "Sort by" }),
+                                el("select", {
+                                    id: "note-sort",
+                                    class: "min-h-11 w-full rounded-lg border px-4 py-2",
+                                }, [
+                                    el("option", { value: "newest", text: "Newest" }),
+                                    el("option", { value: "oldest", text: "Oldest" }),
+                                    el("option", { value: "title_az", text: "Title A-Z" }),
+                                    el("option", { value: "title_za", text: "Title Z-A" }),
+                                ]),
+                            ]),
+                        ]),
                         el("p", {
                             id: "notes-list-status",
                             class: "sr-only",
@@ -2017,9 +2494,9 @@ function mountShell() {
                             "aria-atomic": "true",
                             "data-status-message-id": "0",
                         }),
-                        el("div", { id: "note-list", class: "space-y-2 lg:max-h-[70vh] lg:overflow-auto" }),
+                        el("div", { id: "note-list", class: "space-y-3 lg:max-h-[70vh] lg:overflow-auto" }),
                     ]),
-                    el("div", { id: "editor-panel", class: "min-w-0" }),
+                    el("div", { id: "editor-panel", class: "min-w-0 rounded-lg border p-4 sm:p-6" }),
                 ]),
             ]),
         ]),
@@ -2084,7 +2561,7 @@ function renderSignIn() {
     root.replaceChildren(
         el("a", {
             href: "#main-content",
-            class: "fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0 dark:bg-white dark:text-black",
+            class: "fixed start-4 top-4 z-[100] -translate-y-24 rounded-lg bg-black px-4 py-3 text-sm font-medium text-white shadow-lg transition-transform focus:translate-y-0",
             text: "Skip to content",
         }),
         el("main", {
@@ -2096,7 +2573,7 @@ function renderSignIn() {
             el("p", { class: "text-sm text-zinc-500", text: summary }),
             el("a", {
                 href: "/login?redirect=/app",
-                class: "inline-flex min-h-11 items-center rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black",
+                class: "inline-flex min-h-11 items-center rounded-lg bg-black px-4 py-2 text-sm font-medium text-white",
                 text: "Sign in",
             }),
             el("div", { id: "status-bar", class: "flex flex-wrap items-center justify-center gap-3 text-sm" }),
@@ -2159,18 +2636,22 @@ async function boot() {
     // Pin the per-user database with a lock so only one tab syncs.
     const lockable = async () => {
         let userId = pageUserId() ?? lastUserId();
+        let canSync = true;
 
         if (navigator.onLine) {
-            // The shell can be a cached copy from another session: when
-            // online, always confirm identity against a fresh shell.
-            const probed = await fetchPageUserId();
+            const decision = resolveIdentityForSync({
+                currentUserId: userId,
+                probedUserId: await fetchPageUserId(),
+                online: true,
+            });
 
-            if (probed === null) {
-                // Confirmed signed out: never reopen the previous user.
+            if (decision.status === "signed-out") {
                 forgetUserId();
                 userId = null;
-            } else if (probed !== undefined) {
-                userId = probed;
+            } else if (decision.status === "changed" || decision.status === "same") {
+                userId = decision.userId;
+            } else {
+                canSync = false;
             }
         }
 
@@ -2204,7 +2685,13 @@ async function boot() {
         });
 
         await renderAll();
-        await syncNow();
+
+        if (!canSync) {
+            setRuntime({ lastError: "Could not confirm the signed in account." });
+            return;
+        }
+
+        await syncNow({ verifyIdentity: false });
     };
 
     if (navigator.locks) {

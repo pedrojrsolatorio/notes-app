@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="csrf-token" content="{{ csrf_token() }}" />
-    <meta name="theme-color" content="#09090b" />
+    <meta name="theme-color" content="#262626" />
 
     <title>{{ __('Notes') }} - {{ config('app.name', 'Laravel') }}</title>
 
@@ -17,7 +17,7 @@
 
     @vite(['resources/css/app.css', 'resources/js/offline-app.js'])
 </head>
-<body class="min-h-screen bg-white dark:bg-[#0a0a0a] text-[#1b1b18] dark:text-[#ededec]" data-user-id="{{ auth()->id() }}">
+<body class="min-h-screen bg-white dark:bg-zinc-800" data-user-id="{{ auth()->id() }}">
     <div id="offline-app">
         <div class="flex min-h-screen items-center justify-center p-6 text-sm text-zinc-500">
             Loading your notes…
