@@ -96,7 +96,7 @@ async function pendingCount(db, userId) {
 }
 
 async function hasPending(db, userId, entityType, portableId) {
-    const rows = await db.outbox.where("user_id").equals(userId);
+    const rows = await db.outbox.where("user_id").equals(userId).toArray();
 
     return rows.some(
         (row) => row.entity_type === entityType && row.entity_portable_id === portableId,
@@ -620,22 +620,22 @@ async function syncNow({ manual = false, verifyIdentity = true } = {}) {
             setRuntime({ syncing: false, needsSignIn: false, nextRetryAt: 0 });
             renderAll();
         } catch (error) {
+            setRuntime({ syncing: false });
+
             if (error instanceof NeedsSignInError) {
                 setRuntime({
-                    syncing: false,
                     needsSignIn: true,
                     lastError: null,
                     nextRetryAt: 0,
                 });
             } else {
-                const maxAttempts = await db.outbox
+                const maxAttempts = await runtime.db.outbox
                     .where("user_id")
                     .equals(runtime.userId)
                     .toArray()
                     .then((rows) => rows.reduce((max, row) => Math.max(max, row.attempts ?? 0), 0));
 
                 setRuntime({
-                    syncing: false,
                     lastError: error.message ?? String(error),
                     nextRetryAt: error.retryAt ?? Date.now() + backoffDelay(maxAttempts + 1),
                 });
