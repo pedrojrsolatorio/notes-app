@@ -22,6 +22,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 9 | Note reminders | Slice 5 | in-progress |
 | 10 | Accessibility and responsive use | Slice 6 | in-progress |
 | 11 | Performance as notes grow | Slice 7 | in-progress |
+| 12 | Notes UI redesign | Slice 8 | in-progress |
 
 ## Existing
 
@@ -140,6 +141,19 @@ Keep browsing and searching comfortable as your collection becomes larger.
 spec [0007](../specs/0007-performance-as-notes-grow/index.md)
 Code in `database/migrations/2026_11_21_143804_add_title_key_and_read_indexes_to_notes_table.php`, `app/Models/Note.php`, `app/Http/Controllers/SyncController.php`, `resources/views/components/notes/⚡index.blade.php`, `resources/js/offline-app.js`, `tests/Feature/NotesListPerformanceTest.php`, and `tests/Feature/NotesTest.php`.
 
+### 12. Notes UI redesign · in-progress
+Give both notes surfaces a calm, Apple Notes inspired look with a warm design system, without changing any behavior.
+**Done when:** the redesigned sidebar, note list, editor, toolbar, and states are live on `/notes` in both themes and mirrored on `/app`, with every existing flow and the accessibility guarantees unchanged.
+- [x] Design it (spec): `/architect notes UI redesign`
+- [ ] Build it: `/develop notes UI redesign`
+  - [ ] Add the warm token layer, rebuilt type scale, and the sidebar with smart lists and collapse (AC-1, AC-5)
+  - [ ] Rework the note list rows, search count, document style editor, and slim toolbar (AC-2, AC-3, AC-4)
+  - [ ] Add the empty, skeleton, and error state pass, then the responsive and accessibility sweep (AC-6, AC-8, AC-10)
+  - [ ] Mirror the redesign into `/app` and run the full regression (AC-7, AC-9)
+- [ ] Verify it: `/check verify notes UI redesign`
+spec [0008](../specs/0008-notes-ui-redesign/index.md)
+Code in `resources/views/components/notes/⚡index.blade.php`, `resources/js/offline-app.js`, `resources/views/pwa/notes.blade.php`, and `resources/css/app.css`.
+
 ## Deferred
 
 - Shared notes, collaboration, and public publishing are outside the private solo use planned here.
@@ -150,6 +164,7 @@ Code in `database/migrations/2026_11_21_143804_add_title_key_and_read_indexes_to
 - A repeatable browser accessibility check in CI waits for an approved test dependency (spec 0006).
 - SQLite full text search for notes if the benchmark shows search is the bottleneck (from spec 0007).
 - Snapshot tokens for concurrent edits to active sort keys if page reordering remains noticeable (from spec 0007).
+- Restyle the auth and settings pages to the new warm tokens after the notes surfaces ship (from spec 0008).
 - A repeatable browser timing check in CI when approved browser tooling is available (from spec 0007).
 
 ## Legend
