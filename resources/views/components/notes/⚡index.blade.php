@@ -1,10 +1,10 @@
 <?php
 
+use App\Jobs\SendNoteReminder;
 use App\Models\Folder;
 use App\Models\Note;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use App\Jobs\SendNoteReminder;
 use Flux\Flux;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -231,6 +231,9 @@ new class extends Component
 
     #[Locked]
     public ?int $matchedNotesCount = null;
+
+    #[Locked]
+    public ?int $searchCount = null;
 
     #[Locked]
     public string $listStatusMessage = '';
@@ -822,6 +825,7 @@ new class extends Component
         $this->noteRows = [];
         $this->hasMoreNotes = false;
         $this->matchedNotesCount = null;
+        $this->searchCount = null;
 
         try {
             $page = $this->queryNotePage();
@@ -829,6 +833,9 @@ new class extends Component
             $this->notesCursor = $page['cursor'];
             $this->hasMoreNotes = $page['has_more'];
             $this->matchedNotesCount = $page['matched_count'];
+            $this->searchCount = trim($this->search) !== ''
+                ? ($page['matched_count'] ?? $this->noteListQuery(auth()->user())->count())
+                : null;
         } catch (QueryException) {
             $statusMessage = __('Notes could not be loaded. Try again.');
         }
@@ -994,6 +1001,7 @@ new class extends Component
                 'content' => $note->content ?? '',
                 'reminder_at' => $note->reminder_at?->utc()->toISOString(),
                 'reminder_status' => $note->reminder_status,
+                'updated_at' => $note->updated_at->utc()->toISOString(),
             ])->values()->all(),
             'cursor' => $nextCursor,
             'has_more' => $hasMore,
@@ -1079,6 +1087,7 @@ new class extends Component
             'reminder_at' => $row['reminder_at'] === null
                 ? null
                 : CarbonImmutable::parse($row['reminder_at']),
+            'updated_at' => CarbonImmutable::parse($row['updated_at']),
         ]);
         $selectedNote = null;
 
@@ -1101,6 +1110,11 @@ new class extends Component
         quickCaptureCanSave: false,
         quickCaptureOpenerId: null,
         mobileView: 'list',
+        sidebarCollapsed: localStorage.getItem('notes-sidebar-collapsed') === 'true',
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+            localStorage.setItem('notes-sidebar-collapsed', String(this.sidebarCollapsed));
+        },
         connectionStatus: navigator.onLine ? @js(__('Online')) : @js(__('Offline')),
         openQuickCapture() {
             this.quickCaptureCanSave = false;
@@ -1208,41 +1222,77 @@ new class extends Component
             <span x-text="connectionStatus"></span>
         </p>
 
-        <span wire:loading wire:target="saveNote" aria-hidden="true" class="text-sm text-zinc-500">
+        <span wire:loading wire:target="saveNote" aria-hidden="true" class="text-sm text-zinc-500 dark:text-zinc-400">
             {{ __('Saving…') }}
         </span>
     </div>
 
-    <div class="grid grid-cols-1 gap-6 md:grid-cols-4">
+    <div class="flex flex-col gap-6 md:flex-row">
 
         {{-- Folders --}}
-        <aside class="space-y-2 lg:col-span-1" aria-labelledby="folders-heading">
-            <div class="flex items-center justify-between gap-2">
-                <h2 id="folders-heading" class="text-lg font-semibold">
+        <aside class="min-w-0 shrink-0 space-y-1 border-e border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800"
+            :class="sidebarCollapsed ? 'lg:w-16 lg:p-2' : 'md:w-48 lg:w-56'"
+            aria-labelledby="folders-heading">
+            <div class="hidden justify-end lg:flex"
+                :class="sidebarCollapsed && 'lg:justify-center'">
+                <flux:button type="button" variant="ghost" size="sm"
+                    class="min-h-11 min-w-11"
+                    x-on:click="toggleSidebar()"
+                    x-bind:aria-label="sidebarCollapsed ? @js(__('Expand sidebar')) : @js(__('Collapse sidebar'))"
+                    x-bind:title="sidebarCollapsed ? @js(__('Expand sidebar')) : @js(__('Collapse sidebar'))">
+                    <flux:icon.chevron-double-left class="size-5 transition-transform"
+                        x-bind:class="sidebarCollapsed && 'rotate-180'" />
+                </flux:button>
+            </div>
+
+            <button type="button" wire:click="showNotes; selectFolder(null)"
+                @if ($selectedFolderId === null && !$isTrashView) aria-current="page" @endif
+                aria-label="{{ __('All Notes') }}"
+                :title="sidebarCollapsed ? @js(__('All Notes')) : null"
+                class="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start hover:bg-zinc-100 dark:hover:bg-zinc-700/60 {{ $selectedFolderId === null && !$isTrashView ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}"
+                :class="sidebarCollapsed && 'lg:justify-center lg:px-0'">
+                <flux:icon.document-text class="size-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+                <span class="min-w-0 truncate" :class="sidebarCollapsed && 'lg:hidden'">All Notes</span>
+            </button>
+
+            <button type="button" wire:click="showTrash"
+                @if ($isTrashView) aria-current="page" @endif
+                aria-label="{{ __('Trash') }}"
+                :title="sidebarCollapsed ? @js(__('Trash')) : null"
+                class="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start hover:bg-zinc-100 dark:hover:bg-zinc-700/60 {{ $isTrashView ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}"
+                :class="sidebarCollapsed && 'lg:justify-center lg:px-0'">
+                <flux:icon.trash class="size-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+                <span class="min-w-0 truncate" :class="sidebarCollapsed && 'lg:hidden'">Trash</span>
+            </button>
+
+            <div class="flex items-center justify-between gap-1 pt-2"
+                :class="sidebarCollapsed && 'lg:justify-center'">
+                <h2 id="folders-heading" class="px-1 text-xs font-medium text-zinc-500 dark:text-zinc-400"
+                    :class="sidebarCollapsed && 'lg:hidden'">
                     {{ __('Folders') }}
                 </h2>
 
                 <flux:button type="button" variant="ghost" size="sm" icon="plus" class="min-h-11 min-w-11"
+                    aria-label="{{ __('New folder') }}"
                     wire:click="openCreateFolderModal">
-                    {{ __('New folder') }}
+                    <span :class="sidebarCollapsed && 'lg:hidden'">{{ __('New folder') }}</span>
                 </flux:button>
             </div>
-
-            <button wire:click="showNotes; selectFolder(null)"
-                @if ($selectedFolderId === null && !$isTrashView) aria-current="page" @endif
-                class="block min-h-11 w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 {{ $selectedFolderId === null && !$isTrashView ? 'bg-zinc-100 dark:bg-zinc-800' : '' }}">
-                All Notes
-            </button>
 
             @foreach ($folders as $folder)
                 <div wire:key="folder-{{ $folder->id }}" class="flex items-center gap-1">
                     <button type="button" wire:click="showNotes; selectFolder({{ $folder->id }})"
                         @if ($selectedFolderId === $folder->id && !$isTrashView) aria-current="page" @endif
-                        class="block min-h-11 min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 {{ $selectedFolderId === $folder->id && !$isTrashView ? 'bg-zinc-100 dark:bg-zinc-800' : '' }}">
-                        {{ $folder->name }}
+                        aria-label="{{ $folder->name }}"
+                        :title="sidebarCollapsed ? @js($folder->name) : null"
+                        class="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-start hover:bg-zinc-100 dark:hover:bg-zinc-700/60 {{ $selectedFolderId === $folder->id && !$isTrashView ? 'bg-zinc-200 dark:bg-zinc-700' : '' }}"
+                        :class="sidebarCollapsed && 'lg:justify-center lg:px-0'">
+                        <flux:icon.folder class="hidden size-5 shrink-0 text-zinc-500 dark:text-zinc-400"
+                            x-bind:class="sidebarCollapsed && 'lg:block'" aria-hidden="true" />
+                        <span class="min-w-0 truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ $folder->name }}</span>
                     </button>
 
-                    <flux:dropdown position="bottom" align="end">
+                    <flux:dropdown position="bottom" align="end" x-bind:class="sidebarCollapsed && 'lg:hidden'">
                         <flux:button type="button" variant="ghost" size="sm" icon="ellipsis-horizontal" class="min-h-11 min-w-11"
                             aria-label="{{ __('Actions for :folder', ['folder' => $folder->name]) }}" />
 
@@ -1260,18 +1310,13 @@ new class extends Component
                     </flux:dropdown>
                 </div>
             @endforeach
-
-            <button wire:click="showTrash"
-                class="block min-h-11 w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                Trash
-            </button>
         </aside>
 
         {{-- Notes --}}
-        <section class="min-w-0 md:col-span-3 lg:grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] lg:items-start lg:gap-6" aria-labelledby="note-list-heading">
+        <section class="min-w-0 flex-1 lg:grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] lg:items-start lg:gap-6" aria-labelledby="note-list-heading">
             <div class="min-w-0" data-note-list :class="mobileView === 'editor' ? 'max-lg:hidden' : ''">
             <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-                <h2 id="note-list-heading" x-ref="noteListHeading" tabindex="-1" class="text-2xl font-bold focus:outline-none">
+                <h2 id="note-list-heading" x-ref="noteListHeading" tabindex="-1" class="text-lg font-semibold focus:outline-none">
                     {{ $isTrashView ? __('Trash') : __('Notes') }}
                 </h2>
 
@@ -1301,14 +1346,14 @@ new class extends Component
 
             <div class="mb-6 grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
                 <div>
-                    <label for="notes-search" class="mb-1 block text-sm font-medium">{{ __('Search notes') }}</label>
+                    <label for="notes-search" class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Search notes') }}</label>
                     <input id="notes-search" type="search" wire:model.live.debounce.300ms="search"
                         placeholder="{{ __('Search notes...') }}"
                         class="min-h-11 w-full rounded-lg border px-4 py-2">
                 </div>
 
                 <div>
-                    <label for="notes-sort" class="mb-1 block text-sm font-medium">{{ __('Sort by') }}</label>
+                    <label for="notes-sort" class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Sort by') }}</label>
                     <select id="notes-sort" wire:model.live="sortBy" class="min-h-11 w-full rounded-lg border px-4 py-2">
                         <option value="newest">{{ __('Newest') }}</option>
                         <option value="oldest">{{ __('Oldest') }}</option>
@@ -1317,6 +1362,19 @@ new class extends Component
                     </select>
                 </div>
             </div>
+
+            @if ($searchCount !== null)
+                <div class="mb-4 flex items-center justify-between gap-3">
+                    <p class="text-sm text-zinc-500 dark:text-zinc-400">
+                        {{ __(':count notes', ['count' => $searchCount]) }}
+                    </p>
+                    <button type="button" wire:click="$set('search', '')"
+                        aria-label="{{ __('Clear search') }}"
+                        class="min-h-11 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-700/60">
+                        {{ __('Clear') }}
+                    </button>
+                </div>
+            @endif
 
             <p id="notes-list-status" data-status-message-id="{{ $listMessageId }}" role="status"
                 aria-live="polite" aria-atomic="true" class="sr-only">
@@ -1330,33 +1388,57 @@ new class extends Component
             @endif
 
             @if ($notes->isEmpty())
-                <p class="text-zinc-500">
-                    {{ __('No notes yet.') }}
-                </p>
+                <div id="notes-empty-state" class="px-4 py-16 text-center">
+                    @if (trim($search) !== '')
+                        <p class="text-base font-semibold text-zinc-900 dark:text-zinc-50">{{ __('No matching notes') }}</p>
+
+                        <button type="button" wire:click="$set('search', '')"
+                            class="mt-5 min-h-11 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-700/60">{{ __('Clear search') }}</button>
+                    @elseif ($isTrashView)
+                        <p class="text-base font-semibold text-zinc-900 dark:text-zinc-50">{{ __('Trash is empty') }}</p>
+                        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{{ __('Deleted notes appear here.') }}</p>
+                    @else
+                        <p class="text-base font-semibold text-zinc-900 dark:text-zinc-50">{{ __('No notes yet') }}</p>
+                        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{{ __('Capture your first thought') }}</p>
+
+                        <button type="button" wire:click="createNote"
+                            class="mt-5 min-h-11 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white">{{ __('New note') }}</button>
+                    @endif
+                </div>
             @else
-                <div class="space-y-3">
+                <div class="divide-y divide-zinc-200 dark:divide-zinc-700">
                     @foreach ($notes as $note)
-                        <article wire:key="note-row-{{ $note->id }}" class="rounded-lg border p-4">
-                            @if (!$isTrashView)
-                                <button type="button" id="note-row-{{ $note->id }}"
-                                    wire:click="selectNote({{ $note->id }})"
-                                    @if ($selectedNoteId === $note->id) aria-current="true" @endif
-                                    class="block w-full rounded text-left focus-visible:outline-3 focus-visible:outline-offset-4">
-                                    <span class="block font-semibold">{{ $note->title }}</span>
+                        <article wire:key="note-row-{{ $note->id }}" class="py-3">
+                            <div class="flex flex-wrap items-start gap-x-3">
+                                @if (!$isTrashView)
+                                    <button type="button" id="note-row-{{ $note->id }}"
+                                        wire:click="selectNote({{ $note->id }})"
+                                        @if ($selectedNoteId === $note->id) aria-current="true" @endif
+                                        class="min-w-0 flex-1 rounded px-4 py-1 text-left focus-visible:outline-3 focus-visible:outline-offset-4 {{ $selectedNoteId === $note->id ? 'bg-zinc-100 dark:bg-zinc-700' : 'hover:bg-zinc-50 dark:hover:bg-zinc-700/40' }}">
+                                        <span class="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">{{ $note->title }}</span>
 
-                                    <span class="mt-1 block text-sm text-zinc-500">
-                                        {{ \Illuminate\Support\Str::limit(html_entity_decode(strip_tags($note->content ?? '')), 120) }}
-                                    </span>
-                                </button>
-                            @else
-                                <div id="note-row-{{ $note->id }}">
-                                    <span class="block font-semibold">{{ $note->title }}</span>
+                                        <span class="mt-0.5 block truncate text-sm text-zinc-500 dark:text-zinc-400">
+                                            {{ \Illuminate\Support\Str::limit(html_entity_decode(strip_tags($note->content ?? '')), 120) }}
+                                        </span>
+                                    </button>
+                                @else
+                                    <div id="note-row-{{ $note->id }}" class="min-w-0 flex-1 px-4 py-1">
+                                        <span class="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">{{ $note->title }}</span>
 
-                                    <p class="mt-1 text-sm text-zinc-500">
-                                        {{ \Illuminate\Support\Str::limit(html_entity_decode(strip_tags($note->content ?? '')), 120) }}
-                                    </p>
-                                </div>
-                            @endif
+                                        <p class="mt-0.5 block truncate text-sm text-zinc-500 dark:text-zinc-400">
+                                            {{ \Illuminate\Support\Str::limit(html_entity_decode(strip_tags($note->content ?? '')), 120) }}
+                                        </p>
+                                    </div>
+                                @endif
+
+                                <time datetime="{{ $note->updated_at->utc()->toIso8601String() }}"
+                                    data-updated-at="{{ $note->updated_at->utc()->toIso8601String() }}"
+                                    x-data
+                                    x-text="window.noteDates.formatNoteDate($el.dataset.updatedAt)"
+                                    class="mt-0.5 block w-full shrink-0 px-4 text-xs text-zinc-500 dark:text-zinc-400 sm:mt-0 sm:w-auto sm:text-right">
+                                    {{ $note->updated_at->format('M j, Y') }}
+                                </time>
+                            </div>
                             @if ($note->reminder_at !== null)
                                 <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
                                     <span>{{ __('Reminder') }}</span>
@@ -1367,39 +1449,39 @@ new class extends Component
                                         x-text="window.noteReminderTime.formatReminderTime($el.dataset.reminderAt)"
                                     >{{ $note->reminder_at->utc()->format('Y-m-d H:i') }} UTC</time>
                                     <span class="rounded-full border px-2 py-1 text-xs">{{ __(ucfirst($note->reminder_status)) }}</span>
-                                </div>
-                                <div class="mt-2 flex flex-wrap items-center gap-2">
-                                    @if ($isTrashView)
-                                        <button
-                                            type="button"
-                                            wire:click.stop="clearReminder({{ $note->id }})"
-                                            class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                        >{{ __('Clear reminder') }}</button>
-                                    @else
-                                        <button
-                                            type="button"
-                                            wire:click.stop="openReminderModal({{ $note->id }})"
-                                            class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                        >{{ __('Change') }}</button>
-                                        @if ($note->reminder_status === 'failed')
-                                            <button
-                                                type="button"
-                                                wire:click.stop="retryReminder({{ $note->id }})"
-                                                class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                            >{{ __('Retry now') }}</button>
-                                        @endif
-                                        <button
-                                            type="button"
-                                            wire:click.stop="clearReminder({{ $note->id }})"
-                                            class="min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                        >{{ __('Clear') }}</button>
-                                    @endif
+
+                                    <flux:dropdown position="bottom" align="start">
+                                        <flux:button type="button" variant="ghost" size="sm" icon="ellipsis-horizontal"
+                                            class="min-h-11 min-w-11"
+                                            aria-label="{{ __('Reminder actions') }}"
+                                            title="{{ __('Reminder actions') }}" />
+
+                                        <flux:menu>
+                                            @if ($isTrashView)
+                                                <flux:menu.item as="button" class="min-h-11" wire:click="clearReminder({{ $note->id }})">
+                                                    {{ __('Clear reminder') }}
+                                                </flux:menu.item>
+                                            @else
+                                                <flux:menu.item as="button" class="min-h-11" wire:click="openReminderModal({{ $note->id }})">
+                                                    {{ __('Change') }}
+                                                </flux:menu.item>
+                                                @if ($note->reminder_status === 'failed')
+                                                    <flux:menu.item as="button" class="min-h-11" wire:click="retryReminder({{ $note->id }})">
+                                                        {{ __('Retry now') }}
+                                                    </flux:menu.item>
+                                                @endif
+                                                <flux:menu.item as="button" class="min-h-11" wire:click="clearReminder({{ $note->id }})">
+                                                    {{ __('Clear') }}
+                                                </flux:menu.item>
+                                            @endif
+                                        </flux:menu>
+                                    </flux:dropdown>
                                 </div>
                             @elseif (!$isTrashView)
                                 <button
                                     type="button"
                                     wire:click.stop="openReminderModal({{ $note->id }})"
-                                    class="mt-2 min-h-11 rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                    class="mt-2 min-h-11 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 dark:text-zinc-200 dark:hover:bg-zinc-700"
                                 >{{ __('Set reminder') }}</button>
                             @endif
 
@@ -1425,7 +1507,7 @@ new class extends Component
                 <div class="mt-4">
                     <button type="button" id="load-more-notes" wire:click="loadMoreNotes"
                         wire:loading.attr="disabled" wire:target="loadMoreNotes"
-                        class="min-h-11 rounded-lg border px-4 py-2 text-sm font-medium">
+                        class="min-h-11 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-700/60">
                         {{ __('Load more') }}
                     </button>
                 </div>
@@ -1433,28 +1515,28 @@ new class extends Component
             </div>
 
             @if ($selectedNote)
-                <div class="mt-8 min-w-0 rounded-lg border p-4 sm:p-6 lg:mt-0" :class="mobileView === 'list' ? 'max-lg:hidden' : ''">
+                <div class="mt-8 min-w-0 rounded-xl border p-6 sm:p-8 lg:mt-0" :class="mobileView === 'list' ? 'max-lg:hidden' : ''">
                     <div class="mb-4 flex items-center gap-3">
                         <button type="button" x-on:click="backToList()"
                             class="min-h-11 rounded-lg border px-3 py-2 text-sm font-medium lg:hidden">
                             {{ __('Back to notes') }}
                         </button>
 
-                        <h2 id="note-editor-heading" x-ref="editorHeading" tabindex="-1" class="text-xl font-semibold focus:outline-none">
+                        <h2 id="note-editor-heading" x-ref="editorHeading" tabindex="-1" class="text-lg font-semibold focus:outline-none">
                             {{ __('Edit note') }}
                         </h2>
                     </div>
 
-                    <label for="note-title" class="mb-1 block text-sm font-medium">{{ __('Title') }}</label>
+                    <label for="note-title" class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Title') }}</label>
                     <input id="note-title" type="text" wire:model="title"
                         aria-describedby="note-title-error" aria-invalid="{{ $errors->has('title') ? 'true' : 'false' }}"
-                        class="mb-1 min-h-11 w-full rounded-lg border px-3 py-2">
+                        class="mb-1 min-h-11 w-full border-0 bg-transparent px-0 py-1 text-3xl font-semibold">
 
                     @error('title')
                         <p id="note-title-error" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
                     @enderror
 
-                    <label for="note-folder" class="mb-1 mt-3 block text-sm font-medium">{{ __('Folder') }}</label>
+                    <label for="note-folder" class="mb-1 mt-3 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Folder') }}</label>
                     <select id="note-folder" wire:model="noteFolderId"
                         aria-describedby="note-folder-error" aria-invalid="{{ $errors->has('noteFolderId') ? 'true' : 'false' }}"
                         class="mb-1 min-h-11 w-full rounded-lg border px-3 py-2">
@@ -1476,130 +1558,144 @@ new class extends Component
                         <p id="note-toolbar-help" class="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
                             {{ __('Formatting toolbar. Use Tab to move between controls; pressed buttons are active formats.') }}
                         </p>
-                        <div class="mb-2 rounded-lg border p-1" role="toolbar" aria-label="{{ __('Formatting') }}"
+                        <div class="mb-3 border-b border-zinc-200 pb-2 dark:border-zinc-700" role="toolbar" aria-label="{{ __('Formatting') }}"
                             aria-describedby="note-toolbar-help">
                             <div class="flex flex-wrap items-center gap-1">
-                                <x-notes.toolbar-button label="Bold" action="toggleBold()" :pressed="'activeFormats.bold'" glyph="B" class="font-bold" />
-                                <x-notes.toolbar-button label="Italic" action="toggleItalic()" :pressed="'activeFormats.italic'" glyph="I" class="italic" />
-                                <x-notes.toolbar-button label="Underline" action="toggleUnderline()" :pressed="'activeFormats.underline'" glyph="U" class="underline" />
-                                <x-notes.toolbar-button label="Strikethrough" action="toggleStrike()" :pressed="'activeFormats.strike'" glyph="S" class="line-through" />
+                                <div class="flex items-center gap-1">
+                                    <x-notes.toolbar-button label="Bold" action="toggleBold()" :pressed="'activeFormats.bold'" glyph="B" class="font-bold" />
+                                    <x-notes.toolbar-button label="Italic" action="toggleItalic()" :pressed="'activeFormats.italic'" glyph="I" class="italic" />
+                                    <x-notes.toolbar-button label="Underline" action="toggleUnderline()" :pressed="'activeFormats.underline'" glyph="U" class="underline" />
+                                    <x-notes.toolbar-button label="Strikethrough" action="toggleStrike()" :pressed="'activeFormats.strike'" glyph="S" class="line-through" />
+                                </div>
 
-                                <x-notes.toolbar-button label="Code block" action="toggleCodeBlock()" :pressed="'activeFormats.codeBlock'" glyph="Code" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Bullet list" action="toggleBulletList()" :pressed="'activeFormats.bulletList'" glyph="Bullets" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Numbered list" action="toggleOrderedList()" :pressed="'activeFormats.orderedList'" glyph="Numbers" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Task list" action="toggleTaskList()" :pressed="'activeFormats.taskList'" glyph="Tasks" class="max-md:hidden" />
+                                <div class="flex max-md:hidden items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                                    <x-notes.toolbar-button label="Code block" action="toggleCodeBlock()" :pressed="'activeFormats.codeBlock'" glyph="Code" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Bullet list" action="toggleBulletList()" :pressed="'activeFormats.bulletList'" glyph="Bullets" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Numbered list" action="toggleOrderedList()" :pressed="'activeFormats.orderedList'" glyph="Numbers" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Task list" action="toggleTaskList()" :pressed="'activeFormats.taskList'" glyph="Tasks" class="max-md:hidden" />
+                                </div>
 
-                                <x-notes.toolbar-button label="Paragraph" action="setParagraph()" :pressed="'activeFormats.paragraph'" glyph="P" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Heading 1" action="setHeading(1)" :pressed="'activeFormats.heading1'" glyph="H1" class="max-md:hidden font-bold" />
-                                <x-notes.toolbar-button label="Heading 2" action="setHeading(2)" :pressed="'activeFormats.heading2'" glyph="H2" class="max-md:hidden font-bold" />
-                                <x-notes.toolbar-button label="Heading 3" action="setHeading(3)" :pressed="'activeFormats.heading3'" glyph="H3" class="max-md:hidden font-bold" />
+                                <div class="flex max-md:hidden items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                                    <x-notes.toolbar-button label="Paragraph" action="setParagraph()" :pressed="'activeFormats.paragraph'" glyph="P" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Heading 1" action="setHeading(1)" :pressed="'activeFormats.heading1'" glyph="H1" class="max-md:hidden font-bold" />
+                                    <x-notes.toolbar-button label="Heading 2" action="setHeading(2)" :pressed="'activeFormats.heading2'" glyph="H2" class="max-md:hidden font-bold" />
+                                    <x-notes.toolbar-button label="Heading 3" action="setHeading(3)" :pressed="'activeFormats.heading3'" glyph="H3" class="max-md:hidden font-bold" />
+                                </div>
 
-                                <select aria-label="{{ __('Font size') }}" :value="activeFormats.fontSize" @change="setFontSize($event.target.value)"
-                                    class="max-md:hidden min-h-6 rounded border border-zinc-300 bg-white px-2 py-1 text-sm">
-                                    <option value="mixed" disabled>—</option>
-                                    <option value="12px">12</option>
-                                    <option value="14px">14</option>
-                                    <option value="16px">16</option>
-                                    <option value="18px">18</option>
-                                    <option value="20px">20</option>
-                                    <option value="24px">24</option>
-                                    <option value="28px">28</option>
-                                    <option value="32px">32</option>
-                                </select>
+                                <div class="flex max-md:hidden items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                                    <select aria-label="{{ __('Font size') }}" :value="activeFormats.fontSize" @change="setFontSize($event.target.value)"
+                                        class="max-md:hidden min-h-6 rounded border bg-white px-2 py-1 text-sm dark:bg-zinc-900">
+                                        <option value="mixed" disabled>—</option>
+                                        <option value="12px">12</option>
+                                        <option value="14px">14</option>
+                                        <option value="16px">16</option>
+                                        <option value="18px">18</option>
+                                        <option value="20px">20</option>
+                                        <option value="24px">24</option>
+                                        <option value="28px">28</option>
+                                        <option value="32px">32</option>
+                                    </select>
 
-                                <input type="color" aria-label="{{ __('Font color') }}" :value="activeFormats.color" @input="setColor($event.target.value)"
-                                    class="max-md:hidden h-6 w-8 cursor-pointer rounded border border-zinc-300 bg-white p-0.5" />
+                                    <input type="color" aria-label="{{ __('Font color') }}" :value="activeFormats.color" @input="setColor($event.target.value)"
+                                        class="max-md:hidden h-6 w-8 cursor-pointer rounded border bg-white p-0.5 dark:bg-zinc-900" />
+                                </div>
 
-                                <x-notes.toolbar-button label="Highlight" action="toggleHighlight()" :pressed="'activeFormats.highlight'" glyph="Mark" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Link" action="setLink()" :pressed="'activeFormats.link'" glyph="Link" class="max-md:hidden" />
+                                <div class="flex max-md:hidden items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                                    <x-notes.toolbar-button label="Highlight" action="toggleHighlight()" :pressed="'activeFormats.highlight'" glyph="Mark" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Link" action="setLink()" :pressed="'activeFormats.link'" glyph="Link" class="max-md:hidden" />
+                                </div>
 
-                                <x-notes.toolbar-button label="Align left" action="setTextAlign('left')" :pressed="'activeFormats.alignLeft'" glyph="Left" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Align center" action="setTextAlign('center')" :pressed="'activeFormats.alignCenter'" glyph="Center" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Align right" action="setTextAlign('right')" :pressed="'activeFormats.alignRight'" glyph="Right" class="max-md:hidden" />
-                                <x-notes.toolbar-button label="Justify" action="setTextAlign('justify')" :pressed="'activeFormats.alignJustify'" glyph="Justify" class="max-md:hidden" />
+                                <div class="flex max-md:hidden items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                                    <x-notes.toolbar-button label="Align left" action="setTextAlign('left')" :pressed="'activeFormats.alignLeft'" glyph="Left" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Align center" action="setTextAlign('center')" :pressed="'activeFormats.alignCenter'" glyph="Center" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Align right" action="setTextAlign('right')" :pressed="'activeFormats.alignRight'" glyph="Right" class="max-md:hidden" />
+                                    <x-notes.toolbar-button label="Justify" action="setTextAlign('justify')" :pressed="'activeFormats.alignJustify'" glyph="Justify" class="max-md:hidden" />
+                                </div>
 
-                                <x-notes.toolbar-button label="Insert table" action="insertTable()" glyph="Table" class="max-md:hidden" />
+                                <div class="flex max-md:hidden items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-700">
+                                    <x-notes.toolbar-button label="Insert table" action="insertTable()" glyph="Table" class="max-md:hidden" />
 
-                                <div x-show="activeFormats.table" x-data="{ tableMenuOpen: false }" class="relative max-md:hidden">
-                                    <button type="button" @mousedown.prevent @click="tableMenuOpen = ! tableMenuOpen"
-                                        :aria-expanded="tableMenuOpen ? 'true' : 'false'" aria-haspopup="true"
-                                        aria-label="{{ __('Table options') }}"
-                                        class="inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                        {{ __('Table') }} ▾
-                                    </button>
-
-                                    <div x-show="tableMenuOpen" @click.outside="tableMenuOpen = false" @keydown.escape="tableMenuOpen = false"
-                                        role="group" aria-label="{{ __('Table options') }}"
-                                        class="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                                        <button type="button" @mousedown.prevent @click="addTableRowBefore(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Add row above') }}
+                                    <div x-show="activeFormats.table" x-data="{ tableMenuOpen: false }" class="relative max-md:hidden">
+                                        <button type="button" @mousedown.prevent @click="tableMenuOpen = ! tableMenuOpen"
+                                            :aria-expanded="tableMenuOpen ? 'true' : 'false'" aria-haspopup="true"
+                                            aria-label="{{ __('Table options') }}"
+                                            class="inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700">
+                                            {{ __('Table') }} ▾
                                         </button>
-                                        <button type="button" @mousedown.prevent @click="addTableRowAfter(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Add row below') }}
+
+                                        <div x-show="tableMenuOpen" @click.outside="tableMenuOpen = false" @keydown.escape="tableMenuOpen = false"
+                                            role="group" aria-label="{{ __('Table options') }}"
+                                            class="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                                            <button type="button" @mousedown.prevent @click="addTableRowBefore(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Add row above') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="addTableRowAfter(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Add row below') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="deleteTableRow(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Delete row') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="addTableColumnBefore(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Add column left') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="addTableColumnAfter(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Add column right') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="deleteTableColumn(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Delete column') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="deleteTable(); tableMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950">
+                                                {{ __('Delete table') }}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div x-show="activeFormats.table" x-data="{ widthMenuOpen: false }" class="relative max-md:hidden">
+                                        <button type="button" @mousedown.prevent @click="widthMenuOpen = ! widthMenuOpen"
+                                            :aria-expanded="widthMenuOpen ? 'true' : 'false'" aria-haspopup="true"
+                                            aria-label="{{ __('Table width') }}"
+                                            class="inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700">
+                                            {{ __('Width') }} ▾
                                         </button>
-                                        <button type="button" @mousedown.prevent @click="deleteTableRow(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Delete row') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="addTableColumnBefore(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Add column left') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="addTableColumnAfter(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Add column right') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="deleteTableColumn(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Delete column') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="deleteTable(); tableMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950">
-                                            {{ __('Delete table') }}
-                                        </button>
+
+                                        <div x-show="widthMenuOpen" @click.outside="widthMenuOpen = false" @keydown.escape="widthMenuOpen = false"
+                                            role="group" aria-label="{{ __('Table width') }}"
+                                            class="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                                            <button type="button" @mousedown.prevent @click="setTableWidth(50); widthMenuOpen = false"
+                                                :aria-pressed="activeFormats.tableWidth === 'narrow' ? 'true' : 'false'"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Narrow (50%)') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="setTableWidth(75); widthMenuOpen = false"
+                                                :aria-pressed="activeFormats.tableWidth === 'medium' ? 'true' : 'false'"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Medium (75%)') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="setTableWidth(100); widthMenuOpen = false"
+                                                :aria-pressed="activeFormats.tableWidth === 'wide' ? 'true' : 'false'"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Wide (100%)') }}
+                                            </button>
+                                            <button type="button" @mousedown.prevent @click="setTableWidth(null); widthMenuOpen = false"
+                                                class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                                {{ __('Reset width') }}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div x-show="activeFormats.table" x-data="{ widthMenuOpen: false }" class="relative max-md:hidden">
-                                    <button type="button" @mousedown.prevent @click="widthMenuOpen = ! widthMenuOpen"
-                                        :aria-expanded="widthMenuOpen ? 'true' : 'false'" aria-haspopup="true"
-                                        aria-label="{{ __('Table width') }}"
-                                        class="inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                        {{ __('Width') }} ▾
-                                    </button>
-
-                                    <div x-show="widthMenuOpen" @click.outside="widthMenuOpen = false" @keydown.escape="widthMenuOpen = false"
-                                        role="group" aria-label="{{ __('Table width') }}"
-                                        class="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                                        <button type="button" @mousedown.prevent @click="setTableWidth(50); widthMenuOpen = false"
-                                            :aria-pressed="activeFormats.tableWidth === 'narrow' ? 'true' : 'false'"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Narrow (50%)') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="setTableWidth(75); widthMenuOpen = false"
-                                            :aria-pressed="activeFormats.tableWidth === 'medium' ? 'true' : 'false'"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Medium (75%)') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="setTableWidth(100); widthMenuOpen = false"
-                                            :aria-pressed="activeFormats.tableWidth === 'wide' ? 'true' : 'false'"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Wide (100%)') }}
-                                        </button>
-                                        <button type="button" @mousedown.prevent @click="setTableWidth(null); widthMenuOpen = false"
-                                            class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                                            {{ __('Reset width') }}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="relative md:hidden" x-data="{ moreMenuOpen: false }">
+                                <div class="relative border-l border-zinc-200 pl-2 dark:border-zinc-700 md:hidden" x-data="{ moreMenuOpen: false }">
                                     <button type="button" @mousedown.prevent @click="moreMenuOpen = ! moreMenuOpen"
                                         :aria-expanded="moreMenuOpen ? 'true' : 'false'" aria-haspopup="true"
                                         aria-label="{{ __('More formatting') }}"
-                                        class="inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                        class="inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700">
                                         {{ __('More') }}
                                     </button>
 
@@ -1631,7 +1727,7 @@ new class extends Component
                                             :aria-pressed="activeFormats.heading3 ? 'true' : 'false'"
                                             class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800">{{ __('Heading 3') }}</button>
 
-                                        <label for="more-font-size" class="mt-1 block px-3 py-2 text-xs font-medium text-zinc-500">{{ __('Font size') }}</label>
+                                        <label for="more-font-size" class="mt-1 block px-3 py-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Font size') }}</label>
                                         <select id="more-font-size" :value="activeFormats.fontSize" @change="setFontSize($event.target.value)"
                                             class="mx-3 mb-2 min-h-11 rounded border border-zinc-300 bg-white px-2 py-1 text-sm">
                                             <option value="mixed" disabled>—</option>
@@ -1645,7 +1741,7 @@ new class extends Component
                                             <option value="32px">32</option>
                                         </select>
 
-                                        <label for="more-font-color" class="block px-3 py-2 text-xs font-medium text-zinc-500">{{ __('Font color') }}</label>
+                                        <label for="more-font-color" class="block px-3 py-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Font color') }}</label>
                                         <input id="more-font-color" type="color" :value="activeFormats.color" @input="setColor($event.target.value)"
                                             class="mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-300 bg-white p-1" />
 
@@ -1671,7 +1767,7 @@ new class extends Component
                                             class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">{{ __('Insert table') }}</button>
 
                                         <div x-show="activeFormats.table">
-                                            <p class="mt-1 px-3 py-2 text-xs font-medium text-zinc-500">{{ __('Table options') }}</p>
+                                            <p class="mt-1 px-3 py-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Table options') }}</p>
                                             <button type="button" @mousedown.prevent @click="addTableRowBefore(); moreMenuOpen = false"
                                                 class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">{{ __('Add row above') }}</button>
                                             <button type="button" @mousedown.prevent @click="addTableRowAfter(); moreMenuOpen = false"
@@ -1687,7 +1783,7 @@ new class extends Component
                                             <button type="button" @mousedown.prevent @click="deleteTable(); moreMenuOpen = false"
                                                 class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950">{{ __('Delete table') }}</button>
 
-                                            <p class="mt-1 px-3 py-2 text-xs font-medium text-zinc-500">{{ __('Table width') }}</p>
+                                            <p class="mt-1 px-3 py-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ __('Table width') }}</p>
                                             <button type="button" @mousedown.prevent @click="setTableWidth(50); moreMenuOpen = false"
                                                 :aria-pressed="activeFormats.tableWidth === 'narrow' ? 'true' : 'false'"
                                                 class="block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">{{ __('Narrow (50%)') }}</button>
@@ -1706,7 +1802,7 @@ new class extends Component
                         </div>
 
                         {{-- Editor --}}
-                        <div x-ref="editor" class="w-full rounded-lg border"></div>
+                        <div x-ref="editor" class="w-full"></div>
                     </div>
 
                     <div class="mt-6 border-t border-zinc-200 pt-4">
@@ -1719,7 +1815,7 @@ new class extends Component
                                 <div wire:key="attachment-{{ $noteAttachment->id }}" class="flex flex-wrap items-center justify-between gap-3 p-3 {{ !$loop->last ? 'border-b border-zinc-200' : '' }}">
                                     <div class="min-w-0">
                                         <p class="truncate text-sm font-medium">{{ $noteAttachment->original_name }}</p>
-                                        <p class="text-xs text-zinc-500">{{ number_format($noteAttachment->file_size / 1024, 1) }} KB</p>
+                                        <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ number_format($noteAttachment->file_size / 1024, 1) }} KB</p>
                                     </div>
 
                                     <div class="flex shrink-0 items-center gap-2">
@@ -1737,7 +1833,7 @@ new class extends Component
                                     </div>
                                 </div>
                             @empty
-                                <p class="p-3 text-sm text-zinc-500">{{ __('No attachments yet.') }}</p>
+                                <p class="p-3 text-sm text-zinc-500 dark:text-zinc-400">{{ __('No attachments yet.') }}</p>
                             @endforelse
                         </div>
 
@@ -1750,7 +1846,7 @@ new class extends Component
                                     aria-describedby="attachment-help attachment-error"
                                     aria-invalid="{{ $errors->has('attachment') ? 'true' : 'false' }}"
                                     class="block min-h-11 max-w-full text-sm text-zinc-600 dark:text-zinc-300" />
-                                <p id="attachment-help" class="mt-1 text-xs text-zinc-500">
+                                <p id="attachment-help" class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                                     {{ __('PDF, Word, text, spreadsheet, presentation, or image up to 10 MB.') }}
                                 </p>
                             </div>
@@ -1762,7 +1858,7 @@ new class extends Component
                             </button>
                         </form>
 
-                        <p wire:loading wire:target="attachment" aria-hidden="true" class="mt-2 text-sm text-zinc-500">
+                        <p wire:loading wire:target="attachment" aria-hidden="true" class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
                             {{ __('Uploading file to the server...') }}
                         </p>
 
@@ -1824,7 +1920,7 @@ new class extends Component
                         {{ __('Cancel') }}
                     </flux:button>
                 </flux:modal.close>
-                <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="saveFolder">
+                <flux:button type="submit" variant="primary" class="[--color-accent:black] [--color-accent-foreground:white]" wire:loading.attr="disabled" wire:target="saveFolder">
                     {{ $editingFolderId === null ? __('Create folder') : __('Save changes') }}
                 </flux:button>
             </div>
@@ -1889,7 +1985,7 @@ new class extends Component
                         <flux:modal.close>
                             <flux:button type="button" variant="ghost">{{ __('Cancel') }}</flux:button>
                         </flux:modal.close>
-                        <flux:button type="submit" variant="primary" wire:loading.attr="disabled">
+                        <flux:button type="submit" variant="primary" class="[--color-accent:black] [--color-accent-foreground:white]" wire:loading.attr="disabled">
                             <span wire:loading.remove>{{ __('Save reminder') }}</span>
                             <span wire:loading>{{ __('Saving') }}</span>
                         </flux:button>
@@ -1920,14 +2016,14 @@ new class extends Component
                     aria-describedby="quick-capture-error"
                     aria-invalid="{{ $errors->has('quickCaptureText') ? 'true' : 'false' }}"
                     placeholder="{{ __('What is on your mind?') }}" />
-                <p x-show="!quickCaptureCanSave" class="text-sm text-zinc-500">
+                <p x-show="!quickCaptureCanSave" class="text-sm text-zinc-500 dark:text-zinc-400">
                     {{ __('Write something to capture.') }}
                 </p>
                 <flux:error id="quick-capture-error" name="quickCaptureText" role="alert" />
             </flux:field>
 
             <div class="flex flex-wrap items-center justify-between gap-3">
-                <p class="text-xs text-zinc-500">
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">
                     <kbd class="rounded border px-1">Ctrl</kbd>/<kbd class="rounded border px-1">Cmd</kbd> +
                     <kbd class="rounded border px-1">Enter</kbd> {{ __('to save') }}
                     <span class="mx-2">·</span>
@@ -1942,7 +2038,7 @@ new class extends Component
                         </flux:button>
                     </flux:modal.close>
 
-                    <flux:button type="submit" variant="primary"
+                    <flux:button type="submit" variant="primary" class="[--color-accent:black] [--color-accent-foreground:white]"
                         x-bind:disabled="quickCaptureSaving || !quickCaptureCanSave">
                         {{ __('Save') }}
                     </flux:button>

@@ -146,9 +146,9 @@ Give both notes surfaces a calm, Apple Notes inspired look with a warm design sy
 **Done when:** the redesigned sidebar, note list, editor, toolbar, and states are live on `/notes` in both themes and mirrored on `/app`, with every existing flow and the accessibility guarantees unchanged.
 - [x] Design it (spec): `/architect notes UI redesign`
 - [ ] Build it: `/develop notes UI redesign`
-  - [ ] Add the warm token layer, rebuilt type scale, and the sidebar with smart lists and collapse (AC-1, AC-5)
-  - [ ] Rework the note list rows, search count, document style editor, and slim toolbar (AC-2, AC-3, AC-4)
-  - [ ] Add the empty, skeleton, and error state pass, then the responsive and accessibility sweep (AC-6, AC-8, AC-10)
+  - [x] Add the warm token layer, rebuilt type scale, and the sidebar with smart lists and collapse (AC-1, AC-5)
+  - [x] Rework the note list rows, search count, document style editor, and slim toolbar (AC-2, AC-3, AC-4)
+  - [x] Add the empty, skeleton, and error state pass, then the responsive and accessibility sweep (AC-6, AC-8, AC-10)
   - [ ] Mirror the redesign into `/app` and run the full regression (AC-7, AC-9)
 - [ ] Verify it: `/check verify notes UI redesign`
 spec [0008](../specs/0008-notes-ui-redesign/index.md)

@@ -1,6 +1,7 @@
 import Dexie from "dexie";
 import { resolveIdentityForSync } from "./offline-identity.js";
 import { createTiptapComponent } from "./tiptap.js";
+import { formatNoteDate } from "./note-reminder-time.js";
 
 // ===========================================================================
 // Identity
@@ -989,6 +990,7 @@ const uiState = {
     matchedNotesCount: null,
     notesLoading: false,
     listInitialized: false,
+    firstListLoadDone: false,
     listStatusMessage: "",
     listStatusMessageId: 0,
     pendingListStatusMessage: null,
@@ -1107,8 +1109,8 @@ async function renderStatus() {
             class: "inline-flex min-h-11 items-center rounded border px-3 py-1 text-sm font-medium underline",
             text: "Sign in to sync",
         });
-        lastSync = el("span", { id: "status-last-sync", class: "text-zinc-500" });
-        pendingText = el("span", { id: "status-pending", class: "text-zinc-500" });
+        lastSync = el("span", { id: "status-last-sync", class: "text-zinc-400" });
+        pendingText = el("span", { id: "status-pending", class: "text-zinc-400" });
         retry = el("button", {
             id: "status-sync-now",
             type: "button",
@@ -1502,6 +1504,172 @@ async function loadMoreLocalNotes() {
     }
 }
 
+const SIDEBAR_COLLAPSED_KEY = "notes-sidebar-collapsed";
+let sidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+
+function sidebarIcon(paths, extraClass = "") {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", `size-5 shrink-0 ${extraClass}`.trim());
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.5");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+
+    for (const d of paths) {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        svg.append(path);
+    }
+
+    return svg;
+}
+
+const sidebarIconPaths = {
+    documentText: ["M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"],
+    trash: ["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],
+    folder: ["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],
+    chevronDoubleLeft: ["m18.75 4.5-7.5 7.5 7.5 7.5m-6-15L5.25 12l7.5 7.5"],
+    plus: ["M12 4.5v15m7.5-7.5h-15"],
+    ellipsisHorizontal: ["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+};
+
+function sidebarAsideClasses() {
+    const base = "min-w-0 shrink-0 space-y-1 border-e border-zinc-700 bg-zinc-800 p-3";
+
+    return sidebarCollapsed ? `${base} lg:w-16 lg:p-2` : `${base} md:w-48 lg:w-56`;
+}
+
+function applySidebarState() {
+    const aside = document.getElementById("app-sidebar");
+    const toggle = document.getElementById("sidebar-collapse");
+    const capture = document.getElementById("sidebar-capture");
+
+    if (aside) {
+        aside.className = sidebarAsideClasses();
+    }
+
+    if (toggle) {
+        const label = sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
+        toggle.setAttribute("aria-label", label);
+        toggle.setAttribute("title", label);
+        toggle.querySelector("svg")?.classList.toggle("rotate-180", sidebarCollapsed);
+    }
+
+    if (capture) {
+        capture.classList.toggle("lg:hidden", sidebarCollapsed);
+    }
+}
+
+async function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+    applySidebarState();
+
+    if (runtime.db && runtime.userId !== null) {
+        const folders = await runtime.db.folders.where("user_id").equals(runtime.userId).toArray();
+        await renderFolders(folders);
+    }
+}
+
+let activeFolderMenuClose = null;
+
+function folderActionsMenu(folder) {
+    const wrapper = el("div", { class: `relative ${sidebarCollapsed ? "lg:hidden" : ""}`.trim() });
+    const trigger = el("button", {
+        type: "button",
+        "aria-label": `Actions for ${folder.name}`,
+        "aria-haspopup": "true",
+        "aria-expanded": "false",
+        class: "min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg hover:bg-zinc-700/60",
+    }, [sidebarIcon(sidebarIconPaths.ellipsisHorizontal, "text-zinc-400")]);
+
+    const renameItem = el("button", {
+        type: "button",
+        class: "block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-800",
+        text: "Rename",
+    });
+    const deleteItem = el("button", {
+        type: "button",
+        class: "block min-h-11 w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-950",
+        text: "Delete",
+    });
+
+    const panel = el("div", {
+        role: "group",
+        "aria-label": `Actions for ${folder.name}`,
+        class: "absolute end-0 top-full z-50 mt-1 hidden w-32 rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-lg",
+    }, [renameItem, deleteItem]);
+
+    const close = () => {
+        panel.classList.add("hidden");
+        trigger.setAttribute("aria-expanded", "false");
+        document.removeEventListener("pointerdown", onOutside);
+        document.removeEventListener("keydown", onEscape);
+
+        if (activeFolderMenuClose === close) {
+            activeFolderMenuClose = null;
+        }
+    };
+
+    const onOutside = (event) => {
+        if (!wrapper.contains(event.target)) {
+            close();
+        }
+    };
+
+    const onEscape = (event) => {
+        if (event.key === "Escape") {
+            close();
+        }
+    };
+
+    trigger.addEventListener("click", () => {
+        if (!panel.classList.contains("hidden")) {
+            close();
+            return;
+        }
+
+        activeFolderMenuClose?.();
+        panel.classList.remove("hidden");
+        trigger.setAttribute("aria-expanded", "true");
+        document.addEventListener("pointerdown", onOutside);
+        document.addEventListener("keydown", onEscape);
+        activeFolderMenuClose = close;
+    });
+
+    renameItem.addEventListener("click", async () => {
+        close();
+        const name = window.prompt("Folder name", folder.name);
+
+        if (name && name.trim() !== "") {
+            await renameFolder(folder.portable_id, name.trim());
+            renderAll();
+        }
+    });
+
+    deleteItem.addEventListener("click", async () => {
+        close();
+
+        if (window.confirm(`Delete folder "${folder.name}"? Its notes stay in All Notes.`)) {
+            await deleteFolder(folder.portable_id);
+
+            if (uiState.folderId === folder.portable_id) {
+                uiState.folderId = null;
+            }
+
+            await resetOfflineList();
+            await renderAll();
+        }
+    });
+
+    wrapper.append(trigger, panel);
+
+    return wrapper;
+}
+
 async function renderFolders(folders) {
     const container = document.getElementById("folder-list");
 
@@ -1511,44 +1679,74 @@ async function renderFolders(folders) {
 
     container.replaceChildren();
 
-    const newFolder = el("button", {
-        type: "button",
-        class: "inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800",
-        text: "+ New folder",
-        onclick: async () => {
-            const name = window.prompt("Folder name");
-            if (name && name.trim() !== "") {
-                uiState.folderId = await createFolder(name.trim());
-                uiState.mobileView = "list";
-                await resetOfflineList({ focusHeading: false });
-                await renderAll();
-            }
-        },
-    });
+    const item = (label, active, onclick, icon = null) => {
+        const button = el("button", {
+            type: "button",
+            ...(active ? { "aria-current": "page" } : {}),
+            "aria-label": label,
+            ...(sidebarCollapsed ? { title: label } : {}),
+            class: `flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start hover:bg-zinc-700/60 ${active ? "bg-zinc-700" : ""} ${sidebarCollapsed ? "lg:justify-center lg:px-0" : ""}`.trim(),
+        }, [
+            icon,
+            el("span", { class: `min-w-0 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`.trim(), text: label }),
+        ]);
 
-    container.append(el("div", { class: "flex items-center justify-between gap-2" }, [
-        el("h2", { id: "folders-heading", class: "text-lg font-semibold", text: "Folders" }),
-        newFolder,
-    ]));
+        button.addEventListener("click", onclick);
 
-    const item = (label, active, onclick) => el("button", {
-        type: "button",
-        ...(active ? { "aria-current": "page" } : {}),
-        class: `block min-h-11 w-full rounded-lg px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800" : ""}`.trim(),
-        text: label,
-        onclick,
-    });
+        return button;
+    };
 
     container.append(item("All Notes", !uiState.folderId && uiState.view !== "trash", async () => {
         uiState.folderId = null;
         uiState.view = "all";
         uiState.mobileView = "list";
+
         if (searchTimeout !== null) {
             clearTimeout(searchTimeout);
         }
+
         await resetOfflineList();
         await renderAll();
-    }));
+    }, sidebarIcon(sidebarIconPaths.documentText, "text-zinc-400")));
+
+    container.append(item("Trash", uiState.view === "trash", async () => {
+        uiState.view = "trash";
+        uiState.folderId = null;
+        uiState.mobileView = "list";
+
+        if (searchTimeout !== null) {
+            clearTimeout(searchTimeout);
+        }
+
+        await resetOfflineList();
+        await renderAll();
+    }, sidebarIcon(sidebarIconPaths.trash, "text-zinc-400")));
+
+    const newFolder = el("button", {
+        type: "button",
+        "aria-label": "New folder",
+        ...(sidebarCollapsed ? { title: "New folder" } : {}),
+        class: `inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-medium hover:bg-zinc-700/60 ${sidebarCollapsed ? "lg:px-0" : ""}`.trim(),
+    }, [
+        sidebarIcon(sidebarIconPaths.plus),
+        el("span", { class: sidebarCollapsed ? "lg:hidden" : "", text: "New folder" }),
+    ]);
+
+    newFolder.addEventListener("click", async () => {
+        const name = window.prompt("Folder name");
+
+        if (name && name.trim() !== "") {
+            uiState.folderId = await createFolder(name.trim());
+            uiState.mobileView = "list";
+            await resetOfflineList({ focusHeading: false });
+            await renderAll();
+        }
+    });
+
+    container.append(el("div", { class: `flex items-center justify-between gap-1 pt-2 ${sidebarCollapsed ? "lg:justify-center" : ""}`.trim() }, [
+        el("h2", { id: "folders-heading", class: `px-1 text-xs font-medium text-zinc-400 ${sidebarCollapsed ? "lg:hidden" : ""}`.trim(), text: "Folders" }),
+        newFolder,
+    ]));
 
     const sorted = [...folders].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1559,57 +1757,135 @@ async function renderFolders(folders) {
             uiState.folderId = folder.portable_id;
             uiState.view = "all";
             uiState.mobileView = "list";
+
             if (searchTimeout !== null) {
                 clearTimeout(searchTimeout);
             }
+
             await resetOfflineList();
             await renderAll();
-        }));
+        }, sidebarCollapsed ? sidebarIcon(sidebarIconPaths.folder, "text-zinc-400") : null));
 
-        const rename = el("button", {
-            type: "button",
-            class: "min-h-11 rounded px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800",
-            text: "Rename",
-            onclick: async () => {
-                const name = window.prompt("Folder name", folder.name);
-                if (name && name.trim() !== "") {
-                    await renameFolder(folder.portable_id, name.trim());
-                    renderAll();
-                }
-            },
-        });
-
-        const remove = el("button", {
-            type: "button",
-            class: "min-h-11 rounded px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950",
-            text: "Delete",
-            onclick: async () => {
-                if (window.confirm(`Delete folder "${folder.name}"? Its notes stay in All Notes.`)) {
-                    await deleteFolder(folder.portable_id);
-                    if (uiState.folderId === folder.portable_id) {
-                        uiState.folderId = null;
-                    }
-                    await resetOfflineList();
-                    await renderAll();
-                }
-            },
-        });
-
-        row.append(rename, remove);
+        row.append(folderActionsMenu(folder));
         container.append(row);
     }
+}
 
-    container.append(item("Trash", uiState.view === "trash", async () => {
-        uiState.view = "trash";
-        uiState.folderId = null;
-        uiState.mobileView = "list";
-        if (searchTimeout !== null) {
-            clearTimeout(searchTimeout);
-        }
-        await resetOfflineList();
-        await renderAll();
-    }));
+async function clearSearch() {
+    uiState.search = "";
 
+    const input = document.getElementById("note-search");
+
+    if (input) {
+        input.value = "";
+    }
+
+    if (searchTimeout !== null) {
+        clearTimeout(searchTimeout);
+        searchTimeout = null;
+    }
+
+    await resetOfflineList();
+    await renderAll();
+}
+
+function clearSearchButton(label, extraClasses = "") {
+    return el("button", {
+        type: "button",
+        class: `min-h-11 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-zinc-700/60 ${extraClasses}`.trim(),
+        "aria-label": "Clear search",
+        text: label,
+        onclick: clearSearch,
+    });
+}
+
+function skeletonRow() {
+    return el("div", { class: "animate-pulse px-4 py-3" }, [
+        el("div", { class: "h-4 w-1/2 rounded bg-zinc-800" }),
+        el("div", { class: "mt-2 h-3 w-3/4 rounded bg-zinc-800" }),
+    ]);
+}
+
+function updateSearchCount() {
+    const line = document.getElementById("notes-search-count");
+    const text = document.getElementById("notes-search-count-text");
+
+    if (!line || !text) {
+        return;
+    }
+
+    const show = uiState.search.trim() !== "" && uiState.matchedNotesCount !== null;
+
+    line.classList.toggle("hidden", !show);
+    line.classList.toggle("flex", show);
+
+    if (show) {
+        text.textContent = `${uiState.matchedNotesCount} notes`;
+    }
+}
+
+function emptyStateElement() {
+    const wrap = el("div", { id: "notes-empty-state", class: "px-4 py-16 text-center" });
+
+    if (uiState.search.trim() !== "") {
+        wrap.append(
+            el("p", { class: "text-base font-semibold text-zinc-50", text: "No matching notes" }),
+            clearSearchButton("Clear search", "mt-5"),
+        );
+    } else if (uiState.view === "trash") {
+        wrap.append(
+            el("p", { class: "text-base font-semibold text-zinc-50", text: "Trash is empty" }),
+            el("p", { class: "mt-1 text-sm text-zinc-400", text: "Deleted notes appear here." }),
+        );
+    } else {
+        wrap.append(
+            el("p", { class: "text-base font-semibold text-zinc-50", text: "No notes yet" }),
+            el("p", { class: "mt-1 text-sm text-zinc-400", text: "Capture your first thought" }),
+            el("button", {
+                type: "button",
+                class: "mt-5 min-h-11 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white",
+                text: "New note",
+                onclick: newNote,
+            }),
+        );
+    }
+
+    return wrap;
+}
+
+async function newNote() {
+    const portableId = crypto.randomUUID();
+
+    await runtime.db.notes.put({
+        portable_id: portableId,
+        user_id: runtime.userId,
+        folder_portable_id: null,
+        title: "Untitled Note",
+        title_key: titleKeyFor("Untitled Note"),
+        content: "",
+        version: 0,
+        deleted_at: null,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+        attachments: [],
+        sync_state: "pending",
+        last_synced_at: null,
+    });
+
+    await queueOutbox(runtime.db, runtime.userId, {
+        entity_type: "note",
+        entity_portable_id: portableId,
+        action: "created",
+        payload: { title: "Untitled Note", content: "", folder_portable_id: null },
+        base_version: 0,
+    });
+
+    uiState.selectedNoteId = portableId;
+    uiState.mobileView = "editor";
+    uiState.focusEditorHeading = true;
+    await resetOfflineList({ focusHeading: false });
+    await renderAll();
+    syncNow();
 }
 
 async function renderList() {
@@ -1625,18 +1901,24 @@ async function renderList() {
     }
 
     if (!uiState.listInitialized) {
+        if (!uiState.firstListLoadDone) {
+            container.replaceChildren(...Array.from({ length: 5 }, skeletonRow));
+        }
+
         await loadFirstLocalNotePage();
+        uiState.firstListLoadDone = true;
     }
+
+    updateSearchCount();
 
     const notes = uiState.noteRows;
     container.replaceChildren();
 
     if (notes.length === 0) {
-        container.append(el("p", {
-            class: "p-4 text-sm text-zinc-500",
-            text: uiState.search ? "No notes match your search." : "No notes here yet.",
-        }));
+        container.append(emptyStateElement());
     } else {
+        const rows = el("div", { class: "divide-y divide-zinc-700" });
+
         for (const note of notes) {
             const active = note.portable_id === uiState.selectedNoteId;
             const preview = plainText(note.content).slice(0, 120);
@@ -1645,7 +1927,7 @@ async function renderList() {
                 "data-note-id": note.portable_id,
                 "aria-current": active ? "true" : "false",
                 "aria-label": note.title || "Untitled note",
-                class: "block min-h-11 w-full rounded-lg border p-4 text-left focus-visible:outline-3 focus-visible:outline-offset-4",
+                class: `block min-h-11 w-full px-4 py-3 text-left focus-visible:outline-3 focus-visible:outline-offset-4 ${active ? "bg-zinc-700" : "hover:bg-zinc-700/40"}`,
                 onclick: () => {
                     uiState.selectedNoteId = note.portable_id;
                     uiState.mobileView = "editor";
@@ -1655,35 +1937,48 @@ async function renderList() {
                 },
             });
 
-            const heading = el("div", { class: "flex items-center gap-2" });
-            heading.append(el("span", { class: "flex-1 truncate font-semibold", text: note.title || "Untitled" }));
+            const top = el("div", { class: "flex flex-wrap items-start gap-x-3" });
+            const titleWrap = el("div", { class: "min-w-0 flex-1" }, [
+                el("span", { class: "block truncate text-sm font-semibold text-zinc-50", text: note.title || "Untitled" }),
+            ]);
+
+            if (preview) {
+                titleWrap.append(el("span", { class: "mt-0.5 block truncate text-sm text-zinc-400", text: preview }));
+            }
+
+            top.append(titleWrap);
 
             if (note.sync_state === "pending" || note.sync_state === "conflict") {
                 const dot = note.sync_state === "conflict" ? "bg-red-600" : "bg-amber-600";
-                heading.append(el("span", {
-                    class: `h-2 w-2 shrink-0 rounded-full ${dot}`,
+                top.append(el("span", {
+                    class: `mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`,
                     title: note.sync_state === "conflict" ? "Kept locally, server has a different version" : "Waiting to sync",
                 }));
             }
 
-            item.append(heading);
+            top.append(el("time", {
+                datetime: note.updated_at,
+                class: "mt-0.5 block w-full shrink-0 text-xs text-zinc-400 sm:mt-0 sm:w-auto sm:text-right",
+                text: formatNoteDate(note.updated_at),
+            }));
 
-            if (preview) {
-                item.append(el("p", { class: "mt-1 truncate text-sm text-zinc-500", text: preview }));
-            }
-
-            container.append(item);
+            item.append(top);
+            rows.append(item);
         }
+
+        container.append(rows);
     }
 
     if (uiState.hasMoreNotes) {
-        container.append(el("button", {
-            id: "load-more-notes",
-            type: "button",
-            class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-50",
-            text: "Load more",
-            onclick: loadMoreLocalNotes,
-        }));
+        container.append(el("div", { class: "mt-4" }, [
+            el("button", {
+                id: "load-more-notes",
+                type: "button",
+                class: "min-h-11 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-zinc-700/60 disabled:opacity-50",
+                text: "Load more",
+                onclick: loadMoreLocalNotes,
+            }),
+        ]));
     }
 
     if (uiState.focusNoteId && uiState.mobileView === "list") {
@@ -1731,9 +2026,9 @@ function showEditorError(message) {
 }
 
 const toolbarButtonClass = "inline-flex min-h-6 min-w-6 items-center justify-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
-const toolbarMenuButtonClass = "inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
+const toolbarMenuButtonClass = "inline-flex min-h-6 items-center rounded px-3 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700";
 const toolbarMenuItemClass = "block min-h-11 w-full rounded px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800";
-const toolbarMenuPanelClass = "absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border p-1 shadow-lg";
+const toolbarMenuPanelClass = "absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-lg";
 
 function toolbarAlignmentIcon(paths) {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1763,12 +2058,21 @@ function createTiptapToolbar(component) {
         text: "Formatting toolbar. Use Tab to move between controls; pressed buttons are active formats.",
     });
     const toolbar = el("div", {
-        class: "mb-2 rounded-lg border p-1",
+        class: "mb-3 border-b border-zinc-700 pb-2",
         role: "toolbar",
         "aria-label": "Formatting",
         "aria-describedby": "note-toolbar-help",
     });
     const row = el("div", { class: "flex flex-wrap items-center gap-1" });
+    let currentGroup = null;
+
+    const group = (extraClass = "") => {
+        currentGroup = el("div", { class: `flex items-center gap-1 ${extraClass}`.trim() });
+        row.append(currentGroup);
+
+        return currentGroup;
+    };
+
     const pressedResolvers = new Map();
     const menuClosers = [];
     const tableOnlyNodes = [];
@@ -1815,7 +2119,7 @@ function createTiptapToolbar(component) {
     const addMenuItem = (parent, item) => {
         if (item.heading) {
             const heading = el("p", {
-                class: "mt-1 px-3 py-2 text-xs font-medium text-zinc-500",
+                class: "mt-1 px-3 py-2 text-xs font-medium text-zinc-400",
                 text: item.label,
             });
 
@@ -1890,7 +2194,7 @@ function createTiptapToolbar(component) {
         }
 
         wrapper.append(trigger, panel);
-        row.append(wrapper);
+        currentGroup.append(wrapper);
 
         if (extraClass.includes("max-md:hidden")) {
             tableMenuWrappers.push(wrapper);
@@ -1903,7 +2207,7 @@ function createTiptapToolbar(component) {
         const wrapper = el("div", { class: extraClass });
         const select = el("select", {
             "aria-label": "Font size",
-            class: "min-h-6 rounded border border-zinc-300 bg-white px-2 py-1 text-sm",
+            class: "min-h-6 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm",
             onchange: (event) => component.setFontSize(event.target.value),
         }, [
             el("option", { value: "mixed", disabled: "disabled", text: "—" }),
@@ -1919,7 +2223,7 @@ function createTiptapToolbar(component) {
 
         fontSizeControls.push(select);
         wrapper.append(select);
-        row.append(wrapper);
+        currentGroup.append(wrapper);
 
         return wrapper;
     };
@@ -1931,45 +2235,52 @@ function createTiptapToolbar(component) {
             type: "color",
             "aria-label": "Font color",
             class: compact
-                ? "h-6 w-8 cursor-pointer rounded border border-zinc-300 bg-white p-0.5"
-                : "mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-300 bg-white p-1",
+                ? "h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-0.5"
+                : "mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-1",
             oninput: (event) => component.setColor(event.target.value),
         });
 
         fontColorControls.push(input);
         wrapper.append(input);
-        row.append(wrapper);
+        currentGroup.append(wrapper);
 
         return wrapper;
     };
 
-    addButton(row, "Bold", call("toggleBold"), { glyph: "B", class: "font-bold", format: "bold" });
-    addButton(row, "Italic", call("toggleItalic"), { glyph: "I", class: "italic", format: "italic" });
-    addButton(row, "Underline", call("toggleUnderline"), { glyph: "U", class: "underline", format: "underline" });
-    addButton(row, "Strikethrough", call("toggleStrike"), { glyph: "S", class: "line-through", format: "strike" });
+    group();
+    addButton(currentGroup, "Bold", call("toggleBold"), { glyph: "B", class: "font-bold", format: "bold" });
+    addButton(currentGroup, "Italic", call("toggleItalic"), { glyph: "I", class: "italic", format: "italic" });
+    addButton(currentGroup, "Underline", call("toggleUnderline"), { glyph: "U", class: "underline", format: "underline" });
+    addButton(currentGroup, "Strikethrough", call("toggleStrike"), { glyph: "S", class: "line-through", format: "strike" });
 
-    addButton(row, "Code block", call("toggleCodeBlock"), { glyph: "Code", class: "max-md:hidden", format: "codeBlock" });
-    addButton(row, "Bullet list", call("toggleBulletList"), { glyph: "Bullets", class: "max-md:hidden", format: "bulletList" });
-    addButton(row, "Numbered list", call("toggleOrderedList"), { glyph: "Numbers", class: "max-md:hidden", format: "orderedList" });
-    addButton(row, "Task list", call("toggleTaskList"), { glyph: "Tasks", class: "max-md:hidden", format: "taskList" });
+    group("border-l border-zinc-700 pl-2 max-md:hidden");
+    addButton(currentGroup, "Code block", call("toggleCodeBlock"), { glyph: "Code", class: "max-md:hidden", format: "codeBlock" });
+    addButton(currentGroup, "Bullet list", call("toggleBulletList"), { glyph: "Bullets", class: "max-md:hidden", format: "bulletList" });
+    addButton(currentGroup, "Numbered list", call("toggleOrderedList"), { glyph: "Numbers", class: "max-md:hidden", format: "orderedList" });
+    addButton(currentGroup, "Task list", call("toggleTaskList"), { glyph: "Tasks", class: "max-md:hidden", format: "taskList" });
 
-    addButton(row, "Paragraph", call("setParagraph"), { glyph: "P", class: "max-md:hidden", format: "paragraph" });
-    addButton(row, "Heading 1", call("setHeading", 1), { glyph: "H1", class: "max-md:hidden font-bold", format: "heading1" });
-    addButton(row, "Heading 2", call("setHeading", 2), { glyph: "H2", class: "max-md:hidden font-bold", format: "heading2" });
-    addButton(row, "Heading 3", call("setHeading", 3), { glyph: "H3", class: "max-md:hidden font-bold", format: "heading3" });
+    group("border-l border-zinc-700 pl-2 max-md:hidden");
+    addButton(currentGroup, "Paragraph", call("setParagraph"), { glyph: "P", class: "max-md:hidden", format: "paragraph" });
+    addButton(currentGroup, "Heading 1", call("setHeading", 1), { glyph: "H1", class: "max-md:hidden font-bold", format: "heading1" });
+    addButton(currentGroup, "Heading 2", call("setHeading", 2), { glyph: "H2", class: "max-md:hidden font-bold", format: "heading2" });
+    addButton(currentGroup, "Heading 3", call("setHeading", 3), { glyph: "H3", class: "max-md:hidden font-bold", format: "heading3" });
 
+    group("border-l border-zinc-700 pl-2 max-md:hidden");
     addFontSizeControl("max-md:hidden");
     addFontColorControl("max-md:hidden", true);
 
-    addButton(row, "Highlight", call("toggleHighlight"), { glyph: "Mark", class: "max-md:hidden", format: "highlight" });
-    addButton(row, "Link", call("setLink"), { glyph: "Link", class: "max-md:hidden", format: "link" });
+    group("border-l border-zinc-700 pl-2 max-md:hidden");
+    addButton(currentGroup, "Highlight", call("toggleHighlight"), { glyph: "Mark", class: "max-md:hidden", format: "highlight" });
+    addButton(currentGroup, "Link", call("setLink"), { glyph: "Link", class: "max-md:hidden", format: "link" });
 
-    addButton(row, "Align left", call("setTextAlign", "left"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M2 6.5h8", "M2 9.5h12", "M2 12.5h8"]), class: "max-md:hidden", format: "alignLeft" });
-    addButton(row, "Align center", call("setTextAlign", "center"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M4 6.5h8", "M2 9.5h12", "M4 12.5h8"]), class: "max-md:hidden", format: "alignCenter" });
-    addButton(row, "Align right", call("setTextAlign", "right"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M6 6.5h8", "M2 9.5h12", "M6 12.5h8"]), class: "max-md:hidden", format: "alignRight" });
-    addButton(row, "Justify", call("setTextAlign", "justify"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M2 6.5h12", "M2 9.5h12", "M2 12.5h12"]), class: "max-md:hidden", format: "alignJustify" });
+    group("border-l border-zinc-700 pl-2 max-md:hidden");
+    addButton(currentGroup, "Align left", call("setTextAlign", "left"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M2 6.5h8", "M2 9.5h12", "M2 12.5h8"]), class: "max-md:hidden", format: "alignLeft" });
+    addButton(currentGroup, "Align center", call("setTextAlign", "center"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M4 6.5h8", "M2 9.5h12", "M4 12.5h8"]), class: "max-md:hidden", format: "alignCenter" });
+    addButton(currentGroup, "Align right", call("setTextAlign", "right"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M6 6.5h8", "M2 9.5h12", "M6 12.5h8"]), class: "max-md:hidden", format: "alignRight" });
+    addButton(currentGroup, "Justify", call("setTextAlign", "justify"), { icon: toolbarAlignmentIcon(["M2 3.5h12", "M2 6.5h12", "M2 9.5h12", "M2 12.5h12"]), class: "max-md:hidden", format: "alignJustify" });
 
-    addButton(row, "Insert table", call("insertTable"), { glyph: "Table", class: "max-md:hidden" });
+    group("border-l border-zinc-700 pl-2 max-md:hidden");
+    addButton(currentGroup, "Insert table", call("insertTable"), { glyph: "Table", class: "max-md:hidden" });
 
     createMenu("Table options", "Table ▾", [
         { label: "Add row above", action: call("addTableRowBefore") },
@@ -1988,6 +2299,7 @@ function createTiptapToolbar(component) {
         { label: "Reset width", action: call("setTableWidth", null) },
     ], "max-md:hidden");
 
+    group("border-l border-zinc-700 pl-2 md:hidden");
     createMenu("More formatting", "More", [
         { label: "Bullet list", action: call("toggleBulletList"), format: "bulletList" },
         { label: "Numbered list", action: call("toggleOrderedList"), format: "orderedList" },
@@ -2027,7 +2339,7 @@ function createTiptapToolbar(component) {
         const moreFontSize = el("select", {
             id: "more-font-size",
             "aria-label": "Font size",
-            class: "mx-3 mb-2 min-h-11 rounded border border-zinc-300 bg-white px-2 py-1 text-sm",
+            class: "mx-3 mb-2 min-h-11 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm",
             onchange: (event) => component.setFontSize(event.target.value),
         }, [
             el("option", { value: "mixed", disabled: "disabled", text: "—" }),
@@ -2045,7 +2357,7 @@ function createTiptapToolbar(component) {
             id: "more-font-color",
             type: "color",
             "aria-label": "Font color",
-            class: "mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-300 bg-white p-1",
+            class: "mx-3 mb-2 h-11 w-16 cursor-pointer rounded border border-zinc-700 bg-zinc-900 p-1",
             oninput: (event) => component.setColor(event.target.value),
         });
 
@@ -2144,7 +2456,7 @@ async function renderEditor() {
 
         panel.replaceChildren(
             el("div", {
-                class: "flex min-h-[50vh] items-center justify-center rounded-lg border border-dashed p-6 text-sm text-zinc-500",
+                class: "flex min-h-[50vh] items-center justify-center rounded-lg border border-dashed p-6 text-sm text-zinc-400",
                 text: "Select a note, or capture a thought to start.",
             }),
         );
@@ -2178,7 +2490,7 @@ async function renderEditor() {
             id: "note-title",
             type: "text",
             required: "required",
-            class: "min-h-11 w-full rounded-lg border px-3 py-2 text-lg font-semibold",
+            class: "min-h-11 w-full border-0 bg-transparent px-0 py-1 text-3xl font-semibold",
             value: note.title,
             placeholder: "Title",
             "aria-describedby": "note-title-error",
@@ -2208,23 +2520,23 @@ async function renderEditor() {
                     el("h2", {
                         id: "note-editor-heading",
                         tabindex: "-1",
-                        class: "text-xl font-semibold focus:outline-none",
+                        class: "text-lg font-semibold focus:outline-none",
                         text: "Edit note",
                     }),
                 ]),
                 el("div", { class: "space-y-1" }, [
-                    el("label", { for: "note-title", class: "block text-sm font-medium", text: "Title" }),
+                    el("label", { for: "note-title", class: "mb-1 block text-xs font-medium text-zinc-400", text: "Title" }),
                     titleInput,
                     titleError,
                 ]),
                 el("div", { class: "space-y-1" }, [
-                    el("label", { for: "note-folder", class: "block text-sm font-medium", text: "Folder" }),
+                    el("label", { for: "note-folder", class: "mb-1 block text-xs font-medium text-zinc-400", text: "Folder" }),
                     folderSelect,
                 ]),
                 toolbar.element,
                 el("div", {
                     id: "note-editor",
-                    class: "min-h-[180px] rounded-lg border",
+                    class: "min-h-[180px]",
                     "aria-label": "Note content",
                 }),
                 el("div", { class: "flex flex-wrap items-center gap-2" }, [
@@ -2286,7 +2598,7 @@ async function renderEditor() {
                 ]),
                 note.attachments?.length
                     ? el("div", {
-                        class: "rounded-lg bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400",
+                        class: "rounded-lg bg-zinc-800 p-3 text-sm text-zinc-400",
                         text: `${note.attachments.length} attachment${note.attachments.length === 1 ? "" : "s"} on the server. Attachments need a connection to view.`,
                     })
                     : null,
@@ -2420,15 +2732,25 @@ function mountShell() {
         }),
         el("div", { id: "offline-shell", class: "mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-6" }, [
             el("header", { class: "flex flex-wrap items-center justify-between gap-3" }, [
-                el("h1", { class: "text-2xl font-bold", text: "Notes" }),
+                el("h1", { class: "text-lg font-semibold", text: "Notes" }),
                 el("div", { id: "status-bar", class: "flex flex-wrap items-center gap-3 text-sm" }),
             ]),
             el("div", { id: "status-notices", class: "flex flex-col gap-2", role: "status", "aria-live": "polite" }),
             el("div", { id: "update-banner", class: "hidden" }),
-            el("main", { id: "main-content", tabindex: "-1", class: "grid flex-1 gap-6 md:grid-cols-4" }, [
-                el("aside", { class: "space-y-2 lg:col-span-1", "aria-labelledby": "folders-heading" }, [
-                    el("div", { class: "space-y-2" }, [
-                        el("label", { for: "capture-text", class: "block text-sm font-medium", text: "Quick capture" }),
+            el("main", { id: "main-content", tabindex: "-1", class: "flex flex-1 flex-col gap-6 md:flex-row" }, [
+                el("aside", { id: "app-sidebar", class: sidebarAsideClasses(), "aria-labelledby": "folders-heading" }, [
+                    el("div", { class: "hidden justify-end lg:flex" }, [
+                        el("button", {
+                            id: "sidebar-collapse",
+                            type: "button",
+                            class: "flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-zinc-700/60",
+                            "aria-label": "Collapse sidebar",
+                            title: "Collapse sidebar",
+                            onclick: toggleSidebar,
+                        }, [sidebarIcon(sidebarIconPaths.chevronDoubleLeft, "h-4 w-4")]),
+                    ]),
+                    el("div", { id: "sidebar-capture", class: "space-y-2" }, [
+                        el("label", { for: "capture-text", class: "block text-xs font-medium text-zinc-400", text: "Quick capture" }),
                         el("textarea", {
                             id: "capture-text",
                             rows: 3,
@@ -2438,7 +2760,7 @@ function mountShell() {
                             "aria-describedby": "capture-help capture-error",
                             "aria-invalid": "false",
                         }),
-                        el("p", { id: "capture-help", class: "text-xs text-zinc-500", text: "The first line becomes the title." }),
+                        el("p", { id: "capture-help", class: "text-xs text-zinc-400", text: "The first line becomes the title." }),
                         el("p", { id: "capture-error", role: "alert", class: "hidden text-sm text-red-600 dark:text-red-400" }),
                         el("button", {
                             type: "button",
@@ -2450,7 +2772,7 @@ function mountShell() {
                     el("nav", { id: "folder-list", class: "space-y-1" }),
                 ]),
                 el("section", {
-                    class: "min-w-0 md:col-span-3 lg:grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] lg:items-start lg:gap-6",
+                    class: "min-w-0 flex-1 lg:grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] lg:items-start lg:gap-6",
                     "aria-labelledby": "note-list-heading",
                 }, [
                     el("div", { id: "note-list-wrapper", "data-note-list": "", class: "min-w-0" }, [
@@ -2458,13 +2780,13 @@ function mountShell() {
                             el("h2", {
                                 id: "note-list-heading",
                                 tabindex: "-1",
-                                class: "text-2xl font-bold focus:outline-none",
+                                class: "text-lg font-semibold focus:outline-none",
                                 text: uiState.view === "trash" ? "Trash" : "Notes",
                             }),
                         ]),
                         el("div", { class: "mb-6 grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]" }, [
                             el("div", { class: "space-y-1" }, [
-                                el("label", { for: "note-search", class: "block text-sm font-medium", text: "Search notes" }),
+                                el("label", { for: "note-search", class: "block text-xs font-medium text-zinc-400", text: "Search notes" }),
                                 el("input", {
                                     id: "note-search",
                                     type: "search",
@@ -2474,7 +2796,7 @@ function mountShell() {
                                 }),
                             ]),
                             el("div", { class: "space-y-1" }, [
-                                el("label", { for: "note-sort", class: "block text-sm font-medium", text: "Sort by" }),
+                                el("label", { for: "note-sort", class: "block text-xs font-medium text-zinc-400", text: "Sort by" }),
                                 el("select", {
                                     id: "note-sort",
                                     class: "min-h-11 w-full rounded-lg border px-4 py-2",
@@ -2486,6 +2808,13 @@ function mountShell() {
                                 ]),
                             ]),
                         ]),
+                        el("div", {
+                            id: "notes-search-count",
+                            class: "mb-4 hidden items-center justify-between gap-3",
+                        }, [
+                            el("span", { id: "notes-search-count-text", class: "text-xs font-medium text-zinc-400" }),
+                            clearSearchButton("Clear"),
+                        ]),
                         el("p", {
                             id: "notes-list-status",
                             class: "sr-only",
@@ -2494,9 +2823,9 @@ function mountShell() {
                             "aria-atomic": "true",
                             "data-status-message-id": "0",
                         }),
-                        el("div", { id: "note-list", class: "space-y-3 lg:max-h-[70vh] lg:overflow-auto" }),
+                        el("div", { id: "note-list", class: "lg:max-h-[70vh] lg:overflow-auto" }),
                     ]),
-                    el("div", { id: "editor-panel", class: "min-w-0 rounded-lg border p-4 sm:p-6" }),
+                    el("div", { id: "editor-panel", class: "min-w-0 rounded-xl border p-6 sm:p-8" }),
                 ]),
             ]),
         ]),
@@ -2531,6 +2860,8 @@ function mountShell() {
         await resetOfflineList();
         await renderAll();
     });
+
+    applySidebarState();
 }
 
 async function renderAll() {
@@ -2569,8 +2900,8 @@ function renderSignIn() {
             tabindex: "-1",
             class: "mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center",
         }, [
-            el("h1", { class: "text-2xl font-bold", text: "Notes" }),
-            el("p", { class: "text-sm text-zinc-500", text: summary }),
+            el("h1", { class: "text-lg font-semibold", text: "Notes" }),
+            el("p", { class: "text-sm text-zinc-400", text: summary }),
             el("a", {
                 href: "/login?redirect=/app",
                 class: "inline-flex min-h-11 items-center rounded-lg bg-black px-4 py-2 text-sm font-medium text-white",
@@ -2709,7 +3040,7 @@ async function boot() {
         setRuntime({ online: false });
     });
 
-    window.addEventListener("keydown", (event) => {
+    window.addEventListener("keydown", async (event) => {
         if (
             event.key.toLowerCase() !== "n"
             || ! event.altKey
@@ -2737,6 +3068,11 @@ async function boot() {
 
         if (capture) {
             event.preventDefault();
+
+            if (sidebarCollapsed) {
+                await toggleSidebar();
+            }
+
             capture.focus();
         }
     });

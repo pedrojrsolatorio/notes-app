@@ -577,6 +577,26 @@ test('searches notes by title and content', function () {
         ->assertDontSee('Call mom');
 });
 
+test('[AC-6] shows an exact search result count with a clear control while search is active', function () {
+    $user = User::factory()->create();
+    $user->notes()->create(['title' => 'Buy milk', 'content' => 'from the store']);
+    $user->notes()->create(['title' => 'Read book', 'content' => 'buy more milk first']);
+    $user->notes()->create(['title' => 'Call mom', 'content' => 'on Sunday']);
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->assertSet('searchCount', null)
+        ->assertDontSee('aria-label="Clear search"', false)
+        ->set('search', 'milk')
+        ->assertSet('searchCount', 2)
+        ->assertSee('2 notes')
+        ->assertSee('aria-label="Clear search"', false)
+        ->set('search', '')
+        ->assertSet('searchCount', null)
+        ->assertDontSee('aria-label="Clear search"', false);
+});
+
 test('sorts notes alphabetically by title', function () {
     $user = User::factory()->create();
     $user->notes()->create(['title' => 'Zebra note', 'content' => 'old']);
@@ -587,6 +607,47 @@ test('sorts notes alphabetically by title', function () {
     Livewire::test('notes.index')
         ->set('sortBy', 'title_asc')
         ->assertSeeInOrder(['Apple note', 'Zebra note']);
+});
+
+test('[AC-2] renders the updated date in M j, Y from the note updated timestamp', function () {
+    $user = User::factory()->create();
+    $note = $user->notes()->create(['title' => 'Dated note', 'content' => 'body']);
+    $note->forceFill(['updated_at' => '2024-03-05 12:00:00'])->saveQuietly();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->assertSee('Mar 5, 2024')
+        ->assertSee('data-updated-at="2024-03-05T12:00:00', false);
+});
+
+test('[AC-6] shows the typographic empty states for no notes, no matches, and empty trash', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('notes.index')
+        ->assertSee('id="notes-empty-state"', false)
+        ->assertSee('No notes yet', false)
+        ->assertSee('Capture your first thought', false)
+        ->assertSee('>New note</button>', false);
+
+    $user->notes()->create(['title' => 'Needle note', 'content' => 'body']);
+
+    Livewire::test('notes.index')
+        ->set('search', 'zzz-no-such-note')
+        ->assertSee('id="notes-empty-state"', false)
+        ->assertSee('No matching notes', false)
+        ->assertSee('>Clear search</button>', false)
+        ->assertSee('0 notes', false);
+
+    Livewire::test('notes.index')
+        ->call('showTrash')
+        ->assertSee('id="notes-empty-state"', false)
+        ->assertSee('Trash is empty', false)
+        ->assertSee('Deleted notes appear here.', false)
+        ->assertDontSee('wire:click="createNote"', false)
+        ->assertDontSee('No notes yet', false);
 });
 
 test('[AC-3] derives the normalized title key whenever a note title changes', function () {

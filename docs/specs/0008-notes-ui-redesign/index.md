@@ -1,7 +1,7 @@
 # 0008. Notes UI redesign
 
 **Date**: 2026-11-22
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 
